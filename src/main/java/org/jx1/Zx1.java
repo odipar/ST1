@@ -20,6 +20,7 @@ public final class Zx1 {
 
         // Process optional parameters.
         int skip = 0;
+        int maxOffset = 0;
         boolean forcedMode = false;
         boolean quickMode = false;
         boolean backwardsMode = false;
@@ -30,12 +31,22 @@ public final class Zx1 {
                 case "-b" -> backwardsMode = true;
                 case "-q" -> quickMode = true;
                 default -> {
-                    skip = parseSkip(args[i]);
-                    if (skip <= 0) {
-                        throw Cli.error("Invalid parameter " + args[i]);
+                    if (args[i].startsWith("-m")) {
+                        maxOffset = Cli.parseNumber(args[i].substring(2));
+                        if (maxOffset <= 0) {
+                            throw Cli.error("Invalid parameter " + args[i]);
+                        }
+                    } else {
+                        skip = Cli.parseNumber(args[i]);
+                        if (skip <= 0) {
+                            throw Cli.error("Invalid parameter " + args[i]);
+                        }
                     }
                 }
             }
+        }
+        if (maxOffset > MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0)) {
+            throw Cli.error("Invalid parameter -m" + maxOffset);
         }
 
         // Determine output filename.
@@ -46,10 +57,11 @@ public final class Zx1 {
             outputName = args[i + 1];
         } else {
             Cli.usage("""
-                    Usage: zx1 [-f] [-b] [-q] input [output.zx1]
+                    Usage: zx1 [-f] [-b] [-q] [-mN] input [output.zx1]
                       -f      Force overwrite of output file
                       -b      Compress backwards
-                      -q      Quick non-optimal compression""");
+                      -q      Quick non-optimal compression
+                      -mN     Limit backreference offsets to N bytes""");
             return;
         }
         String inputName = args[i];
@@ -80,7 +92,8 @@ public final class Zx1 {
         if (backwardsMode) {
             reverse(input);
         }
-        int offsetLimit = quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
+        int offsetLimit = maxOffset > 0 ? maxOffset
+                : quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
         Compressor.Result result =
                 Compressor.compress(Optimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode);
         byte[] output = result.output();
@@ -99,14 +112,6 @@ public final class Zx1 {
         System.out.printf("File%s compressed%s from %d to %d bytes! (delta %d)%n",
                 skip != 0 ? " partially" : "", backwardsMode ? " backwards" : "",
                 input.length - skip, output.length, result.delta());
-    }
-
-    private static int parseSkip(String arg) {
-        try {
-            return Integer.parseInt(arg);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 
     private static void reverse(byte[] data) {
