@@ -25,7 +25,9 @@ Additions/differences to the original:
   (284 bytes), resumable 68000 decompressor with a 22-byte state block, ported from the
   Java `Decompressor` state machine and verified against Java-compressed streams under
   emulation. [68k/jx1_68000_opt.S](68k/jx1_68000_opt.S) is the performance-optimized
-  variant (dbf copy loops, word arithmetic, movem context tricks, all-short branches);
+  variant (278 bytes, 19-byte state block): dbf copy loops (22 vs 30 cycles/byte), word
+  arithmetic, movem context tricks and all-short branches give 6–29% fewer instructions
+  than the base version (16–18% at chunk 16, ~29% at chunk 127 on copy-dominated data);
   it assumes ops no longer than 32K and chunk sizes 1..127
 
 ## Layout
