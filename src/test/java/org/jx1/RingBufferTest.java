@@ -60,7 +60,7 @@ final class RingBufferTest {
         }
         byte[] compressed = compress(input, 300);
         assertArrayEquals(input, Decompressor.decompress(compressed, new byte[300]));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(AssertionError.class,
                 () -> Decompressor.decompress(compressed, new byte[299]));
     }
 
@@ -68,7 +68,7 @@ final class RingBufferTest {
     void rejectsBackreferenceBeyondBufferSize() {
         // farMatch contains an offset of ~2700, far beyond a 512-byte ring.
         byte[] compressed = compress(TestData.farMatch(), Zx1.MAX_OFFSET_ZX1);
-        var e = assertThrows(IllegalArgumentException.class,
+        AssertionError e = assertThrows(AssertionError.class,
                 () -> Decompressor.decompress(compressed, new byte[512]));
         assertTrue(String.valueOf(e.getMessage()).startsWith("Backreference beyond ring buffer"));
     }
@@ -100,7 +100,7 @@ final class RingBufferTest {
 
     @Test
     void rejectsEmptyBuffer() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(AssertionError.class,
                 () -> Decompressor.decompress(compress(TestData.text(), 511), new byte[0]));
     }
 }

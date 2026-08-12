@@ -25,9 +25,7 @@ public abstract class Decompressor {
     private long flushedSize;
 
     protected Decompressor(byte[] input, byte[] buffer) {
-        if (buffer.length == 0) {
-            throw new IllegalArgumentException("Empty ring buffer");
-        }
+        assert buffer.length > 0 : "Empty ring buffer";
         this.input = input;
         this.buffer = buffer;
     }
@@ -56,8 +54,9 @@ public abstract class Decompressor {
     }
 
     /**
-     * Decompresses the whole input stream; throws {@link IllegalArgumentException} on bad data.
-     * Resets all stream state on entry, so an instance may be reused.
+     * Decompresses the whole input stream. Malformed data trips Java assertions (enable with
+     * {@code -ea}); with assertions disabled, behavior on malformed data is undefined, like the
+     * z80/68k decompressors. Resets all stream state on entry, so an instance may be reused.
      */
     public final void decompress() {
         inputIndex = 0;
@@ -87,9 +86,7 @@ public abstract class Decompressor {
                     if (bufferIndex != 0) {
                         flip(buffer, bufferIndex);
                     }
-                    if (inputIndex != input.length) {
-                        throw new IllegalArgumentException("Input file too long");
-                    }
+                    assert inputIndex == input.length : "Input file too long";
                     return;
                 }
                 copyBytes(lastOffset, readInterlacedEliasGamma() + 1);
@@ -107,10 +104,8 @@ public abstract class Decompressor {
     }
 
     private int readByte() {
-        if (inputIndex == input.length) {
-            throw new IllegalArgumentException(
-                    input.length == 0 ? "Empty input file" : "Truncated input file");
-        }
+        assert inputIndex < input.length
+                : input.length == 0 ? "Empty input file" : "Truncated input file";
         return input[inputIndex++] & 255;
     }
 
@@ -141,12 +136,8 @@ public abstract class Decompressor {
     }
 
     private void copyBytes(int offset, int length) {
-        if (offset > flushedSize + bufferIndex) {
-            throw new IllegalArgumentException("Invalid data in input file");
-        }
-        if (offset > buffer.length) {
-            throw new IllegalArgumentException("Backreference beyond ring buffer in input file");
-        }
+        assert offset <= flushedSize + bufferIndex : "Invalid data in input file";
+        assert offset <= buffer.length : "Backreference beyond ring buffer in input file";
         for (int i = 0; i < length; i++) {
             int index = bufferIndex - offset;
             writeByte(buffer[index >= 0 ? index : buffer.length + index]);
