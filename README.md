@@ -22,9 +22,11 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — [68k/jx1_68000.S](68k/jx1_68000.S) is a size-optimized
-  (280 bytes), resumable 68000 decompressor with a 22-byte state block, ported from the
+  (284 bytes), resumable 68000 decompressor with a 22-byte state block, ported from the
   Java `Decompressor` state machine and verified against Java-compressed streams under
-  emulation; a performance-optimized version can come later
+  emulation. [68k/jx1_68000_opt.S](68k/jx1_68000_opt.S) is the performance-optimized
+  variant (dbf copy loops, word arithmetic, movem context tricks, all-short branches);
+  it assumes ops no longer than 32K and chunk sizes 1..127
 
 ## Layout
 
