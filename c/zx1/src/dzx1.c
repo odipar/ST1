@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BUFFER_SIZE 512  /* must be > MAX_OFFSET */
+#define BUFFER_SIZE 65536  /* must be > MAX_OFFSET */
 #define INITIAL_OFFSET 1
 
 #define FALSE 0

@@ -29,8 +29,8 @@
 
 #include "zx1.h"
 
-#define MAX_OFFSET_ZX1    511
-#define MAX_OFFSET_ZX7     511
+#define MAX_OFFSET_ZX1    32512
+#define MAX_OFFSET_ZX7     2176
 
 void reverse(unsigned char *first, unsigned char *last) {
     unsigned char c;
