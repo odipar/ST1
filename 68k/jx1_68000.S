@@ -14,7 +14,7 @@
 ; on malformed data is undefined.
 ;
 ; The resumable state lives in a 22-byte context block (Java: the Decompressor
-; fields). dzx1_resume produces at most ctx_chunk output bytes per call
+; fields). jx1_resume produces at most ctx_chunk output bytes per call
 ; (Java: resume() with chunkSize) and returns d0=0 once the stream is fully
 ; processed, else d0=1. Like the Java version it parses ahead after spending
 ; the budget, so the call emitting the final byte already returns 0.
@@ -23,8 +23,8 @@
 ; to 70% over straight-line decompression, depending on how copy-dominated
 ; the data is. A later performance-optimized version can reduce it.
 ;
-; Calling convention: dzx1_init and dzx1_resume clobber d0-d5/a0-a2 and leave
-; a5 = context untouched; dzx1_decompress additionally uses (but restores) a5.
+; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
+; a5 = context untouched; jx1_decompress additionally uses (but restores) a5.
 ; -----------------------------------------------------------------------------
 
 ; Context block (Java: Decompressor's fields). The first four longwords are
@@ -39,16 +39,16 @@ ctx_state       equ     21              ; .b  State: 0 START, 1 LITERALS, 2 MATC
 ctx_size        equ     22
 
 ; Jump table, so callers can use base+0/4/8 when linking flat binaries.
-                bra.w   dzx1_init
-                bra.w   dzx1_decompress
-                bra.w   dzx1_resume
+                bra.w   jx1_init
+                bra.w   jx1_decompress
+                bra.w   jx1_resume
 
 ; -----------------------------------------------------------------------------
-; dzx1_init: a0 = compressed data, a1 = destination, d0.l = chunk size X >= 1,
+; jx1_init: a0 = compressed data, a1 = destination, d0.l = chunk size X >= 1,
 ;            a5 = context block of ctx_size bytes.
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------
-dzx1_init:
+jx1_init:
         move.l  a0,ctx_src(a5)
         move.l  a1,ctx_dst(a5)
         move.l  d0,ctx_chunk(a5)
@@ -60,27 +60,27 @@ dzx1_init:
         rts
 
 ; -----------------------------------------------------------------------------
-; dzx1_decompress: a0 = compressed data, a1 = destination.
+; jx1_decompress: a0 = compressed data, a1 = destination.
 ; One-shot convenience; returns with a1 = end of output.
 ; Java: the static Decompressor.decompress() helpers.
 ; -----------------------------------------------------------------------------
-dzx1_decompress:
+jx1_decompress:
         move.l  a5,-(sp)
         lea     -ctx_size(sp),sp
         movea.l sp,a5
         move.l  #$7fffffff,d0           ; budget covers any stream
-        bsr     dzx1_init
-        bsr     dzx1_resume
+        bsr     jx1_init
+        bsr     jx1_resume
         lea     ctx_size(sp),sp
         movea.l (sp)+,a5
         rts
 
 ; -----------------------------------------------------------------------------
-; dzx1_resume: a5 = context. Emits at most ctx_chunk output bytes.
+; jx1_resume: a5 = context. Emits at most ctx_chunk output bytes.
 ; Returns d0 = 0 when the stream is fully processed, 1 when there is more;
 ; a1 = current end of output. Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
-dzx1_resume:
+jx1_resume:
         movem.l (a5),d3-d4/a0-a1        ; lastOffset, remaining, src, dst
         move.b  ctx_bits(a5),d2
         move.l  ctx_chunk(a5),d5        ; budget = chunkSize
