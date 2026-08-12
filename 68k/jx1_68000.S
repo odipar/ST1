@@ -1,5 +1,5 @@
 ; -----------------------------------------------------------------------------
-; dzx1_68000.S - resumable ZX1 decompressor for the Motorola 68000
+; jx1_68000.S - resumable ZX1 decompressor for the Motorola 68000
 ;
 ; Port of the Java state machine in src/main/java/org/jx1/Decompressor.java
 ; (jx1), itself a port of dzx1.c from https://github.com/einar-saukas/ZX1 by
