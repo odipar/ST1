@@ -22,7 +22,7 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — resumable 68000 decompressors ported from the Java
-  `Decompressor` state machine, in seven variants (see the table below), all verified
+  `Decompressor` state machine, in eight variants (see the table below), all verified
   byte-identical against Java-compressed streams under cycle-measured emulation
 
 ## 68k variants
@@ -41,6 +41,7 @@ speed. The `opt*` variants assume no single op longer than 32K and chunk sizes 1
 | [jx1_68000_opt3.S](68k/jx1_68000_opt3.S) | 284 | 15 | z80/`unzx0` control flow: single refill in the gamma reader (ZX1 can only empty the bit queue on a continuation bit), bare `add.b` bit reads, one shared `resume_op`; no duplicated code; d4 clobbered | 1–28% over opt2, 1–7% behind opt2_m (chunks 16+) |
 | [jx1_68000_opt4.S](68k/jx1_68000_opt4.S) | 418 | 15 | opt3 plus a two-tier copy engine: sizes <16 dispatch on `n&15` into a ladder of 16 rolled-out `move.b`s (computed `jmp (a4)`, address registers only); ≥16 uses an unrolled `move.l` pair loop with long/word/byte tail after an aligning head byte (needs equal parity, offset ≥ 4 for matches) — gate failures run ladder passes instead | vs opt3 at chunk 127: +33–44% on all copy-dominated data, +3% parse-heavy; at chunk 16: +5–9% copy-dominated, −2% parse-heavy |
 | [jx1_68000_opt5.S](68k/jx1_68000_opt5.S) | 336 | 15 | opt4 reduced to the ladder alone: every copy dispatches on `n&15` into the rolled-out `move.b` ladder plus `n>>4` full passes — no alignment/overlap gates, uniform ~12.6 cycles/byte | 1–37% over opt3 everywhere; 2–8% over opt4 except large aligned copies at chunk 127, where opt4 stays 2–24% ahead |
+| [jx1_68000_opt6.S](68k/jx1_68000_opt6.S) | 316 | 15 | opt5 with an 8-step ladder and a pc-relative dispatch (`jmp ladder_end(pc,d0.w)` with d0 = −2·(n&7), the file's one indexed mode): no base register, a3/a4 free again, clobbers back to d0–d5/a0–a2 | +0.4–0.6% over opt5 at chunk 16; 0.4–3.5% behind at chunk 127 (dbf every 8 bulk bytes instead of 16) |
 
 ## Layout
 
