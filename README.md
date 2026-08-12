@@ -21,29 +21,24 @@ Additions/differences to the original:
 * **asserts instead of checks** — malformed-input validation uses Java `assert`, so run
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
-* **68k target vs z80 target** — [68k/jx1_68000.S](68k/jx1_68000.S) is a size-optimized
-  (284 bytes), resumable 68000 decompressor with a 22-byte state block, ported from the
-  Java `Decompressor` state machine and verified against Java-compressed streams under
-  emulation. [68k/jx1_68000_opt.S](68k/jx1_68000_opt.S) is the performance-optimized
-  variant (278 bytes, 19-byte state block): dbf copy loops (22 vs 30 cycles/byte), word
-  arithmetic, movem context tricks and all-short branches give 6–29% fewer instructions
-  than the base version (16–18% at chunk 16, ~29% at chunk 127 on copy-dominated data);
-  it assumes ops no longer than 32K and chunk sizes 1..127.
-  [68k/jx1_68000_opt2.S](68k/jx1_68000_opt2.S) additionally packs lastOffset and the
-  remaining count into one register (swap-accessed), shrinking the state block to
-  15 bytes, preserving d4, and saving another 0.9–2.4% of cycles on copy-dominated
-  data at chunk 16 (~1% slower on parse-heavy data).
-  [68k/jx1_68000_opt2_m.S](68k/jx1_68000_opt2_m.S) (308 bytes) further inlines
-  `get_bit` and `take_budget` as macros, removing 34 cycles of bsr/rts overhead per
-  bit read and per operation: 27–29% fewer cycles on parse-heavy data, 14–15% on
-  text, 4–7% on copy-dominated data vs opt2.
-  [68k/jx1_68000_opt3.S](68k/jx1_68000_opt3.S) (284 bytes) instead restructures the
-  control flow like the z80 `dzx1_standard.asm` and `unzx0_68000.S`: the only bit-queue
-  refill lives in the gamma reader (a ZX1 stream can only run the queue empty on a
-  continuation bit), transition and data bits are bare `add.b`, and one shared
-  `resume_op` body holds the single `take_budget` — no macros, no duplicated code,
-  1–28% faster than opt2 and 1–7% behind opt2_m at chunks 16+ (tiny chunks pay the
-  shared-body tax: down to ~2% slower than opt2 on barely-compressible data)
+* **68k target vs z80 target** — resumable 68000 decompressors ported from the Java
+  `Decompressor` state machine, in five variants (see the table below), all verified
+  byte-identical against Java-compressed streams under cycle-measured emulation
+
+## 68k variants
+
+All variants share the same jump-table ABI (base+0 `jx1_init`, +4 `jx1_decompress`,
++8 `jx1_resume`) and produce identical output; they differ in size, state block, and
+speed. The `opt*` variants assume no single op longer than 32K and chunk sizes 1..127
+(undefined when violated). Speed figures are emulator-measured 68000 cycles.
+
+| File | Bytes | State | Technique | Speed |
+|---|---|---|---|---|
+| [jx1_68000.S](68k/jx1_68000.S) | 284 | 22 | reference port, no assumptions; copy 30 cycles/byte, ~335-cycle fixed cost per resume call | baseline |
+| [jx1_68000_opt.S](68k/jx1_68000_opt.S) | 278 | 19 | `dbf` copy loops (22 cycles/byte), word arithmetic, movem context tricks, all-short branches | 6–29% fewer instructions than base |
+| [jx1_68000_opt2.S](68k/jx1_68000_opt2.S) | 282 | 15 | lastOffset and remaining packed into one `swap`-accessed register; d4 caller-preserved | 0.9–2.4% faster than opt (copy-dominated, chunk 16); ~1% slower parse-heavy |
+| [jx1_68000_opt2_m.S](68k/jx1_68000_opt2_m.S) | 308 | 15 | `get_bit`/`take_budget` inlined as macros: no bsr/rts per bit read or per op | fastest: 27–29% over opt2 parse-heavy, 14–15% text, 4–7% copy-dominated |
+| [jx1_68000_opt3.S](68k/jx1_68000_opt3.S) | 284 | 15 | z80/`unzx0` control flow: single refill in the gamma reader (ZX1 can only empty the bit queue on a continuation bit), bare `add.b` bit reads, one shared `resume_op`; no duplicated code; d4 clobbered | 1–28% over opt2, 1–7% behind opt2_m (chunks 16+) |
 
 ## Layout
 
