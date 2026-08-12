@@ -57,8 +57,13 @@ smc3, offlut, gammalut), and [68k/jx1_68000_opt_combo.S](68k/jx1_68000_opt_combo
 combines them: split literals/match bodies with a self-modified resume branch and
 match-source `lea`, woven per-body gammas, a folded budget gate, and a 256-word
 offset table — measured **+9.6–20.6% over opt7 at chunk 16** (up to +22.3% at
-chunk 127), all corpora positive, at 918 bytes. The SMC variants require RAM
-code, a single active context, and a plain 68000.
+chunk 127), all corpora positive, at 918 bytes.
+[68k/jx1_68000_opt_x16.S](68k/jx1_68000_opt_x16.S) tunes the combo further for
+chunk 16 (32-step ladders, context shaves) and adds `jx1_resume_n`, a batched
+resume that keeps all state in registers between chunks and runs the caller's
+per-chunk work as a callback: **+27–30.6% over opt7 at chunk 16** with batches
+of 4–8 chunks. The SMC variants require RAM code, a single active context, and
+a plain 68000.
 
 ## Layout
 

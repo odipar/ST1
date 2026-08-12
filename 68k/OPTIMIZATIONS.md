@@ -239,3 +239,46 @@ variant. The six X=16-relevant variants live in this directory as
 | `jx1_68000_opt_offlut.S` | offset-lut lut2_offpath |
 | `jx1_68000_opt_gammalut.S` | gamma-lut g_t0r |
 | `jx1_68000_opt_combo.S` | combination (see its header) |
+
+## Round 2: X = 16 focus (jx1_68000_opt_x16.S)
+
+Three quick inline rounds on top of the combo, each measured at chunk 16
+before proceeding (corrected cycle model; percentages vs the previous step):
+
+**Round 1 - 32-step copy ladders** (+2.2-3.2% on copy-touched corpora, ~0 on
+word-soup): with a 32-step ladder every chunk-16 copy is a pure partial entry
+- zero dbf passes (the dispatch pays lsr.w #5 instead of #3, +4 cycles per
+copy, overwhelmed by the -20-and-more per 16-byte block). fill32's insight
+applied without any of its bulk machinery.
+
+**Round 2 - context shaves** (cumulative +1.6-6.3% over the combo): the chunk
+becomes a word field (one move.w (a5)+ load, killing the moveq #0 zero
+extension), and the write-only state byte disappears entirely - the patched
+entry_bra IS the state, so both suspends drop a byte store and the end path
+drops two instructions.
+
+**Round 3 - batched resume** (the headline): jx1_resume_n (jump-table slot
+base+12; d6.w = chunk count k, a6 = callback) processes up to k chunks per
+call with every register staying live between chunks; the between-chunk
+boundary costs ~60 cycles (subq/bne + jsr round trip + budget refresh from
+d7) instead of the ~150-cycle suspend+entry round trip. The callback runs
+between chunks (k-1 times per full batch), may clobber d0/d1/d5/a2-a4, must
+preserve d2/d3/d6/d7/a0/a1/a5/a6; d4 belongs entirely to the caller. The
+plain jx1_resume is the same code at k = 1 and pays one subq/bne per call.
+
+Measured at chunk 16 against opt7:
+
+| corpus | x16 plain | batched k=4 | batched k=8 |
+|---|---|---|---|
+| word-soup | +19.7% | +27.0% | +28.2% |
+| text | +13.5% | +27.0% | +29.3% |
+| far-match | +11.8% | +27.7% | +30.3% |
+| all-same | +11.9% | +27.8% | +30.3% |
+| max-offset | +11.0% | +27.3% | +29.9% |
+| rle-32k | +11.8% | +28.0% | +30.6% |
+
+1034 bytes (522 code + 512 table). Correctness: the 13-case differential
+harness at chunks 16/1/7/127 on the plain path, the even/odd-destination
+alignment audit, and a dedicated batched-API check (k = 2/4/8 at chunk 16 on
+all 13 corpora: byte-identical output, exact per-batch emission, call counts,
+d4 preservation through calls and callbacks).
