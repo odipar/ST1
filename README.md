@@ -30,7 +30,10 @@ Additions/differences to the original:
 All variants share the same jump-table ABI (base+0 `jx1_init`, +4 `jx1_decompress`,
 +8 `jx1_resume`) and produce identical output; they differ in size, state block, and
 speed. The `opt*` variants assume no single op longer than 32K and chunk sizes 1..127
-(undefined when violated). Speed figures are emulator-measured 68000 cycles.
+(undefined when violated). Speed figures are emulator-measured 68000 cycles. The full
+optimization exploration behind the `opt_*` variants — 18 measured prototypes,
+including insights and negative results — is documented in
+[68k/OPTIMIZATIONS.md](68k/OPTIMIZATIONS.md).
 
 | File | Bytes | State | Technique | Speed |
 |---|---|---|---|---|
@@ -43,6 +46,19 @@ speed. The `opt*` variants assume no single op longer than 32K and chunk sizes 1
 | [jx1_68000_opt5.S](68k/jx1_68000_opt5.S) | 336 | 15 | opt4 reduced to the ladder alone: every copy dispatches on `n&15` into the rolled-out `move.b` ladder plus `n>>4` full passes — no alignment/overlap gates, uniform ~12.6 cycles/byte | 1–37% over opt3 everywhere; 2–8% over opt4 except large aligned copies at chunk 127, where opt4 stays 2–24% ahead |
 | [jx1_68000_opt6.S](68k/jx1_68000_opt6.S) | 316 | 15 | opt5 with an 8-step ladder and a pc-relative dispatch (`jmp ladder_end(pc,d0.w)` with d0 = −2·(n&7), the file's one indexed mode): no base register, a3/a4 free again, clobbers back to d0–d5/a0–a2 | +0.4–0.6% over opt5 at chunk 16; 0.4–3.5% behind at chunk 127 (dbf every 8 bulk bytes instead of 16) |
 | [jx1_68000_opt7.S](68k/jx1_68000_opt7.S) | 324 | 15 | opt6 with `get_gamma` peeled and rotated: the first continuation bit is read up front (length-1 values fall straight through) and the continue branch doubles as the loop jump — no unconditional `bra` per pair, no macros, no unrolling | +2.9–3.7% over opt6 on parse-heavy data, +1.1–2.1% text, +0.2–0.4% copy-dominated |
+
+## 68k exploration variants
+
+A measured optimization exploration beyond opt7 lives in
+[68k/OPTIMIZATIONS.md](68k/OPTIMIZATIONS.md) (18 prototyped variants across six
+themes, including the insights and negative results). The chunk-16-relevant
+winners are checked in as `68k/jx1_68000_opt_<variant>.S` (wc3, threaded, smc2,
+smc3, offlut, gammalut), and [68k/jx1_68000_opt_combo.S](68k/jx1_68000_opt_combo.S)
+combines them: split literals/match bodies with a self-modified resume branch and
+match-source `lea`, woven per-body gammas, a folded budget gate, and a 256-word
+offset table — measured **+9.6–20.6% over opt7 at chunk 16** (up to +22.3% at
+chunk 127), all corpora positive, at 918 bytes. The SMC variants require RAM
+code, a single active context, and a plain 68000.
 
 ## Layout
 
