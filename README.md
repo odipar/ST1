@@ -10,10 +10,14 @@ Additions/differences to the original:
   `dzx1 -mN` decompresses through an N-byte ring buffer. A buffer of size N supports
   offsets up to exactly N, so small targets can trade compression ratio for memory
   (e.g. `-m511` compresses for decompression in a 511-byte buffer)
-* **incremental/re-entrant** — `Decompressor` streams output through an externally
-  supplied ring buffer passed to its constructor; each time the buffer fills, the abstract
+* **incremental buffer** — `Decompressor` streams output through an externally supplied
+  ring buffer passed to its constructor; each time the buffer fills, the abstract
   `flip(buffer, length)` method decides where the bytes go (the default implementation
   collects them in a growable in-memory buffer). No global state; instances are reusable
+* **resumable decompression** — construction takes a chunk size X; `resume()` returns
+  control to the caller after producing at most X output bytes, and returns `false` once
+  the stream is fully processed: `while (d.resume()) { ... }` (named `resume` because
+  `continue` is a reserved word in Java)
 * **asserts instead of checks** — malformed-input validation uses Java `assert`, so run
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
@@ -25,7 +29,7 @@ Additions/differences to the original:
 |---|---|
 | `Block`, `Optimizer` | `zx1.h`, `memory.c` (obsoleted by GC), `optimize.c` |
 | `Compressor` | `compress.c` |
-| `Decompressor` | `dzx1.c`, restructured around the ring-buffer `flip` hook |
+| `Decompressor` | `dzx1.c`, restructured as a resumable state machine around the ring-buffer `flip` hook |
 | `Zx1`, `Dzx1` | the `zx1`/`dzx1` command-line tools, same flags plus `-mN` |
 
 ## Usage
