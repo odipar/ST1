@@ -1,6 +1,8 @@
 package org.jx1;
 
+import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -17,10 +19,16 @@ public final class Dzx1 {
 
         // Process hidden optional parameters.
         boolean forcedMode = false;
+        int bufferSize = Decompressor.DEFAULT_BUFFER_SIZE;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             if (args[i].equals("-f")) {
                 forcedMode = true;
+            } else if (args[i].startsWith("-m")) {
+                bufferSize = Cli.parseNumber(args[i].substring(2));
+                if (bufferSize <= 0) {
+                    throw Cli.error("Invalid parameter " + args[i]);
+                }
             } else {
                 throw Cli.error("Invalid parameter " + args[i]);
             }
@@ -41,8 +49,9 @@ public final class Dzx1 {
             outputName = args[i + 1];
         } else {
             Cli.usage("""
-                    Usage: dzx1 [-f] input.zx1 [output]
-                      -f      Force overwrite of output file""");
+                    Usage: dzx1 [-f] [-mN] input.zx1 [output]
+                      -f      Force overwrite of output file
+                      -mN     Ring buffer of N bytes (default 65536); N must cover the largest offset""");
             return;
         }
 
@@ -60,22 +69,29 @@ public final class Dzx1 {
             throw Cli.error("Already existing output file " + outputName);
         }
 
-        // Decompress.
-        byte[] output;
-        try {
-            output = Decompressor.decompress(input);
+        // Decompress, streaming each buffer flip straight to the output file like the C original.
+        try (var output = new BufferedOutputStream(Files.newOutputStream(outputPath))) {
+            new Decompressor(input, new byte[bufferSize]) {
+                @Override
+                protected void flip(byte[] buffer, int length) {
+                    try {
+                        output.write(buffer, 0, length);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                }
+            }.decompress();
+        } catch (IOException | UncheckedIOException e) {
+            throw Cli.error("Cannot write output file " + outputName);
         } catch (IllegalArgumentException e) {
             throw Cli.error(e.getMessage() + " " + inputName);
         }
 
-        // Write output file.
+        // Done!
         try {
-            Files.write(outputPath, output);
+            System.out.printf("File decompressed from %d to %d bytes!%n", input.length, Files.size(outputPath));
         } catch (IOException e) {
             throw Cli.error("Cannot write output file " + outputName);
         }
-
-        // Done!
-        System.out.printf("File decompressed from %d to %d bytes!%n", input.length, output.length);
     }
 }

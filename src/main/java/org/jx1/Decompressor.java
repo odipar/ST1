@@ -1,37 +1,71 @@
 package org.jx1;
 
-import java.util.Arrays;
+import java.io.ByteArrayOutputStream;
 
 /**
  * ZX1 decompressor. Java port of {@code dzx1.c} from
  * <a href="https://github.com/einar-saukas/ZX1">ZX1</a> by Einar Saukas.
  *
- * <p>The C original streams through a 64K ring buffer and uses {@code goto}; here the output
- * simply grows in memory and the control flow is restructured into loops.
+ * <p>Output streams through an externally supplied ring buffer, so memory use is bounded by the
+ * buffer, not the output: a buffer of size N supports back-references up to N bytes, and each time
+ * the buffer fills {@link #flip} decides where its bytes go. Subclass to stream output anywhere;
+ * the static {@link #decompress(byte[], byte[])} methods collect it in memory.
  */
-public final class Decompressor {
+public abstract class Decompressor {
+
+    /** Ring buffer size of the C reference implementation; covers the full ZX1 offset range. */
+    public static final int DEFAULT_BUFFER_SIZE = 65536;
 
     private final byte[] input;
+    private final byte[] buffer;
     private int inputIndex;
     private int bitMask;
     private int bitValue;
+    private int bufferIndex;
+    private long flushedSize;
 
-    /** Largest array the JVM can reliably allocate; caps output at ~2 GiB (the C original streams unbounded). */
-    private static final int MAX_OUTPUT_SIZE = Integer.MAX_VALUE - 8;
-
-    private byte[] output = new byte[65536];
-    private int outputIndex;
-
-    private Decompressor(byte[] input) {
+    protected Decompressor(byte[] input, byte[] buffer) {
+        if (buffer.length == 0) {
+            throw new IllegalArgumentException("Empty ring buffer");
+        }
         this.input = input;
+        this.buffer = buffer;
     }
 
-    /** Decompresses a complete ZX1 stream; throws {@link IllegalArgumentException} on bad data. */
+    /**
+     * Consumes the first {@code length} bytes of the ring buffer: called with a full buffer each
+     * time it flips, and once more at the end of the stream for the remaining bytes, if any.
+     */
+    protected abstract void flip(byte[] buffer, int length);
+
+    /** Decompresses a complete ZX1 stream in memory, using the default buffer size. */
     public static byte[] decompress(byte[] input) {
-        return new Decompressor(input).run();
+        return decompress(input, new byte[DEFAULT_BUFFER_SIZE]);
     }
 
-    private byte[] run() {
+    /** Decompresses a complete ZX1 stream in memory, through the given ring buffer. */
+    public static byte[] decompress(byte[] input, byte[] buffer) {
+        var output = new ByteArrayOutputStream();
+        new Decompressor(input, buffer) {
+            @Override
+            protected void flip(byte[] flipped, int length) {
+                output.write(flipped, 0, length);
+            }
+        }.decompress();
+        return output.toByteArray();
+    }
+
+    /**
+     * Decompresses the whole input stream; throws {@link IllegalArgumentException} on bad data.
+     * Resets all stream state on entry, so an instance may be reused.
+     */
+    public final void decompress() {
+        inputIndex = 0;
+        bitMask = 0;
+        bitValue = 0;
+        bufferIndex = 0;
+        flushedSize = 0;
+
         int lastOffset = Optimizer.INITIAL_OFFSET;
         while (true) {
             // Copy literals.
@@ -50,10 +84,13 @@ public final class Decompressor {
                 // Copy from new offset; an offset <= 0 is the end marker.
                 lastOffset = readOffset();
                 if (lastOffset <= 0) {
+                    if (bufferIndex != 0) {
+                        flip(buffer, bufferIndex);
+                    }
                     if (inputIndex != input.length) {
                         throw new IllegalArgumentException("Input file too long");
                     }
-                    return Arrays.copyOf(output, outputIndex);
+                    return;
                 }
                 copyBytes(lastOffset, readInterlacedEliasGamma() + 1);
             } while (readBit());
@@ -95,21 +132,24 @@ public final class Decompressor {
     }
 
     private void writeByte(int value) {
-        if (outputIndex == output.length) {
-            if (output.length == MAX_OUTPUT_SIZE) {
-                throw new IllegalArgumentException("Output too large from input file");
-            }
-            output = Arrays.copyOf(output, (int) Math.min(2L * output.length, MAX_OUTPUT_SIZE));
+        buffer[bufferIndex++] = (byte) value;
+        if (bufferIndex == buffer.length) {
+            flip(buffer, bufferIndex);
+            flushedSize += bufferIndex;
+            bufferIndex = 0;
         }
-        output[outputIndex++] = (byte) value;
     }
 
     private void copyBytes(int offset, int length) {
-        if (offset > outputIndex) {
+        if (offset > flushedSize + bufferIndex) {
             throw new IllegalArgumentException("Invalid data in input file");
         }
+        if (offset > buffer.length) {
+            throw new IllegalArgumentException("Backreference beyond ring buffer in input file");
+        }
         for (int i = 0; i < length; i++) {
-            writeByte(output[outputIndex - offset]);
+            int index = bufferIndex - offset;
+            writeByte(buffer[index >= 0 ? index : buffer.length + index]);
         }
     }
 }
