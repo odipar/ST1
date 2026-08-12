@@ -6,4 +6,4 @@ Additions/differences to the original:
 * incremental/re-entrant
 * 68k target vs z80 target
 
-See ./c/zx1/src for the original source code
+See [c/zx1/src](c/zx1/src) for the original source code
