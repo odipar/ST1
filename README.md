@@ -28,7 +28,11 @@ Additions/differences to the original:
   variant (278 bytes, 19-byte state block): dbf copy loops (22 vs 30 cycles/byte), word
   arithmetic, movem context tricks and all-short branches give 6–29% fewer instructions
   than the base version (16–18% at chunk 16, ~29% at chunk 127 on copy-dominated data);
-  it assumes ops no longer than 32K and chunk sizes 1..127
+  it assumes ops no longer than 32K and chunk sizes 1..127.
+  [68k/jx1_68000_opt2.S](68k/jx1_68000_opt2.S) additionally packs lastOffset and the
+  remaining count into one register (swap-accessed), shrinking the state block to
+  15 bytes, preserving d4, and saving another 0.9–2.4% of cycles on copy-dominated
+  data at chunk 16 (~1% slower on parse-heavy data)
 
 ## Layout
 
