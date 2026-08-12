@@ -21,7 +21,7 @@ Additions/differences to the original:
 * **asserts instead of checks** — malformed-input validation uses Java `assert`, so run
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
-* **68k target vs z80 target** — [68k/dzx1_68000.S](68k/dzx1_68000.S) is a size-optimized
+* **68k target vs z80 target** — [68k/jx1_68000.S](68k/jx1_68000.S) is a size-optimized
   (280 bytes), resumable 68000 decompressor with a 22-byte state block, ported from the
   Java `Decompressor` state machine and verified against Java-compressed streams under
   emulation; a performance-optimized version can come later
