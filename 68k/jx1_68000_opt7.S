@@ -1,14 +1,15 @@
 ; -----------------------------------------------------------------------------
-; jx1_68000_opt7.S - gamma-ladder resumable ZX1 decompressor (68000)
+; jx1_68000_opt7.S - rotated-gamma resumable ZX1 decompressor (68000)
 ;
-; jx1_68000_opt6.S with get_gamma unrolled into a ladder: the first
-; GAMMA_UNROLL continuation/data pairs run as straight-line code, each
-; with its own early bcc exit, eliminating the 10-cycle loop back-jump
-; per pair (40 -> 30 cycles per data bit); rare long values fall into
-; the compact loop tail. The refill check stays on every continuation
-; read (any of them can be the 8th bit of a group), data bits stay bare
-; per the opt3 invariant. Everything else is opt6 unchanged: the 8-step
-; pc-relative copy ladder, one shared resume_op, 15-byte context.
+; jx1_68000_opt6.S with get_gamma restructured instead of merely looped:
+; the first continuation bit is peeled off, so a length-1 value falls
+; straight through, and the loop is rotated so that the continue branch
+; (bcs) is itself the back-jump - the 10-cycle unconditional bra per data
+; bit disappears while each pair keeps exactly the same two flag tests.
+; 32 instead of 40 cycles per data bit, on every pair, with no macros and
+; no unrolling; the only duplication is the peeled 8-byte refill block.
+; Both continuation reads keep the refill check (either can be the 8th
+; bit of a group); data bits stay bare per the opt3 invariant.
 ;
 ; Same assumptions as jx1_68000_opt.S, undefined when violated:
 ;
@@ -16,9 +17,9 @@
 ;   2. the chunk size is 1..127
 ;
 ; Measured against jx1_68000_opt6.S: +2.9-3.7% on parse-heavy data (many
-; short gammas), +0.9-1.6% on text, +0.1-0.2% on copy-dominated data.
-; Three unrolled pairs capture almost the whole win; a fourth adds only
-; +0.1-0.2% for 14 bytes. 358 bytes.
+; short gammas), +1.1-2.1% on text, +0.2-0.4% on copy-dominated data -
+; the same gains the discarded unrolled-ladder attempt measured, at 34
+; fewer bytes. 324 bytes.
 ;
 ;
 
@@ -29,19 +30,6 @@
 ; a5. (As in opt3, d4 carries the op state.)
 ; -----------------------------------------------------------------------------
 
-
-; gamma_pair: one interlaced-gamma step - continuation bit (with refill),
-; early exit when the value is complete, then the bare data bit.
-gamma_pair      macro
-                add.b   d2,d2           ; continuation bit: a refill site
-                bne.s   .have\@
-                move.b  (a0)+,d2        ; refill; ZX1 bit groups always open
-                addx.b  d2,d2           ; on a continuation bit
-.have\@:
-                bcc.s   gamma_done      ; 0: value complete
-                add.b   d2,d2           ; data bit: never a refill
-                addx.w  d1,d1           ; value = value*2 + data bit
-                endm
 
 ; Context block (Java: Decompressor's fields). The first three longwords are
 ; laid out in movem order d3,a0,a1.
@@ -113,18 +101,27 @@ jx1_resume:
         rts
 
 ; get_gamma: interlaced Elias gamma value in d1.w (assumption: fits a word).
-; Holds the decompressor's only bit-queue refills. The common short lengths
-; run the straight-line pair ladder; long values loop. Java:
-; readInterlacedEliasGamma().
+; Holds the decompressor's only bit-queue refills. The first continuation
+; bit is peeled, and the loop is rotated so the continue branch is the
+; back-jump: no unconditional bra per pair. Java: readInterlacedEliasGamma().
 get_gamma:
         moveq   #1,d1
-        gamma_pair                      ; pairs 1..GAMMA_UNROLL: no back-jump
-        gamma_pair
-        gamma_pair
+        add.b   d2,d2                   ; first continuation bit (refill site)
+        bne.s   gamma_first
+        move.b  (a0)+,d2                ; refill; ZX1 bit groups always open on a
+        addx.b  d2,d2                   ; continuation bit (see jx1_68000_opt3.S)
+gamma_first:
+        bcc.s   gamma_done              ; 0: value is 1, straight through
 gamma_loop:
-        gamma_pair                      ; rare long values keep looping
-        bra.s   gamma_loop
-gamma_done:
+        add.b   d2,d2                   ; data bit: never a refill
+        addx.w  d1,d1                   ; value = value*2 + data bit
+        add.b   d2,d2                   ; next continuation bit (refill site)
+        bne.s   gamma_have
+        move.b  (a0)+,d2
+        addx.b  d2,d2
+gamma_have:
+        bcs.s   gamma_loop              ; 1: another pair; the continue branch
+gamma_done:                             ; doubles as the loop jump
         rts
 
 begin_literals:                         ; Java: beginLiterals()
