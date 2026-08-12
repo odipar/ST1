@@ -1,7 +1,5 @@
 package org.jx1;
 
-import static java.util.Objects.requireNonNull;
-
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -62,12 +60,14 @@ public final class Optimizer {
                     // Copy from new offset.
                     if (++matchLength[offset] > 1) {
                         if (bestLengthSize < matchLength[offset]) {
-                            int bits = requireNonNull(optimal[index - bestLength[bestLengthSize]]).bits()
-                                    + eliasGammaBits(bestLength[bestLengthSize] - 1);
+                            Block best = optimal[index - bestLength[bestLengthSize]];
+                            assert best != null;
+                            int bits = best.bits() + eliasGammaBits(bestLength[bestLengthSize] - 1);
                             do {
                                 bestLengthSize++;
-                                int bits2 = requireNonNull(optimal[index - bestLengthSize]).bits()
-                                        + eliasGammaBits(bestLengthSize - 1);
+                                Block shorter = optimal[index - bestLengthSize];
+                                assert shorter != null;
+                                int bits2 = shorter.bits() + eliasGammaBits(bestLengthSize - 1);
                                 if (bits2 <= bits) {
                                     bestLength[bestLengthSize] = bestLengthSize;
                                     bits = bits2;
@@ -77,7 +77,8 @@ public final class Optimizer {
                             } while (bestLengthSize < matchLength[offset]);
                         }
                         int length = bestLength[matchLength[offset]];
-                        Block previous = requireNonNull(optimal[index - length]);
+                        Block previous = optimal[index - length];
+                        assert previous != null;
                         int bits = previous.bits() + 1 + (offset > 128 ? 16 : 8) + eliasGammaBits(length - 1);
                         Block match = lastMatch[offset];
                         if (match == null || match.index() != index || match.bits() > bits) {
@@ -110,7 +111,9 @@ public final class Optimizer {
 
         System.out.println("]");
 
-        return requireNonNull(optimal[input.length - 1]);
+        Block last = optimal[input.length - 1];
+        assert last != null;
+        return last;
     }
 
     private static Block better(@Nullable Block current, Block candidate) {

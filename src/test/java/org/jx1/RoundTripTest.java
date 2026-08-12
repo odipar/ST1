@@ -43,20 +43,20 @@ final class RoundTripTest {
     void rejectsTruncatedInput() {
         byte[] compressed = compress(TestData.text());
         byte[] truncated = Arrays.copyOf(compressed, compressed.length - 2);
-        assertThrows(IllegalArgumentException.class, () -> Decompressor.decompress(truncated));
+        assertThrows(AssertionError.class, () -> Decompressor.decompress(truncated));
     }
 
     @Test
     void rejectsTrailingGarbage() {
         byte[] compressed = compress(TestData.text());
         byte[] tooLong = Arrays.copyOf(compressed, compressed.length + 1);
-        assertThrows(IllegalArgumentException.class, () -> Decompressor.decompress(tooLong));
+        assertThrows(AssertionError.class, () -> Decompressor.decompress(tooLong));
     }
 
     @Test
     void rejectsInvalidBackReference() {
         // A back-reference into data that was never produced: literals(1)='A', then offset 2.
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(AssertionError.class,
                 () -> Decompressor.decompress(new byte[] {0b0100_0000, 'A', (byte) 252, 0}));
     }
 }

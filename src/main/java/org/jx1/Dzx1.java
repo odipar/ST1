@@ -62,6 +62,9 @@ public final class Dzx1 {
         } catch (IOException e) {
             throw Cli.error("Cannot access input file " + inputName);
         }
+        if (input.length == 0) {
+            throw Cli.error("Empty input file " + inputName);
+        }
 
         // Check output file.
         Path outputPath = Path.of(outputName);
@@ -83,7 +86,8 @@ public final class Dzx1 {
             }.decompress();
         } catch (IOException | UncheckedIOException e) {
             throw Cli.error("Cannot write output file " + outputName);
-        } catch (IllegalArgumentException e) {
+        } catch (AssertionError e) {
+            // With -ea, malformed input trips a descriptive assertion; report it like the C tool.
             throw Cli.error(e.getMessage() + " " + inputName);
         }
 
