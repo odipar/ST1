@@ -32,7 +32,11 @@ Additions/differences to the original:
   [68k/jx1_68000_opt2.S](68k/jx1_68000_opt2.S) additionally packs lastOffset and the
   remaining count into one register (swap-accessed), shrinking the state block to
   15 bytes, preserving d4, and saving another 0.9–2.4% of cycles on copy-dominated
-  data at chunk 16 (~1% slower on parse-heavy data)
+  data at chunk 16 (~1% slower on parse-heavy data).
+  [68k/jx1_68000_opt2_m.S](68k/jx1_68000_opt2_m.S) (308 bytes) further inlines
+  `get_bit` and `take_budget` as macros, removing 34 cycles of bsr/rts overhead per
+  bit read and per operation: 27–29% fewer cycles on parse-heavy data, 14–15% on
+  text, 4–7% on copy-dominated data vs opt2
 
 ## Layout
 
