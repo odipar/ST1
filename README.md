@@ -22,7 +22,7 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — resumable 68000 decompressors ported from the Java
-  `Decompressor` state machine, in five variants (see the table below), all verified
+  `Decompressor` state machine, in seven variants (see the table below), all verified
   byte-identical against Java-compressed streams under cycle-measured emulation
 
 ## 68k variants
@@ -39,6 +39,8 @@ speed. The `opt*` variants assume no single op longer than 32K and chunk sizes 1
 | [jx1_68000_opt2.S](68k/jx1_68000_opt2.S) | 282 | 15 | lastOffset and remaining packed into one `swap`-accessed register; d4 caller-preserved | 0.9–2.4% faster than opt (copy-dominated, chunk 16); ~1% slower parse-heavy |
 | [jx1_68000_opt2_m.S](68k/jx1_68000_opt2_m.S) | 308 | 15 | `get_bit`/`take_budget` inlined as macros: no bsr/rts per bit read or per op | fastest: 27–29% over opt2 parse-heavy, 14–15% text, 4–7% copy-dominated |
 | [jx1_68000_opt3.S](68k/jx1_68000_opt3.S) | 284 | 15 | z80/`unzx0` control flow: single refill in the gamma reader (ZX1 can only empty the bit queue on a continuation bit), bare `add.b` bit reads, one shared `resume_op`; no duplicated code; d4 clobbered | 1–28% over opt2, 1–7% behind opt2_m (chunks 16+) |
+| [jx1_68000_opt4.S](68k/jx1_68000_opt4.S) | 418 | 15 | opt3 plus a two-tier copy engine: sizes <16 dispatch on `n&15` into a ladder of 16 rolled-out `move.b`s (computed `jmp (a4)`, address registers only); ≥16 uses an unrolled `move.l` pair loop with long/word/byte tail after an aligning head byte (needs equal parity, offset ≥ 4 for matches) — gate failures run ladder passes instead | vs opt3 at chunk 127: +33–44% on all copy-dominated data, +3% parse-heavy; at chunk 16: +5–9% copy-dominated, −2% parse-heavy |
+| [jx1_68000_opt5.S](68k/jx1_68000_opt5.S) | 336 | 15 | opt4 reduced to the ladder alone: every copy dispatches on `n&15` into the rolled-out `move.b` ladder plus `n>>4` full passes — no alignment/overlap gates, uniform ~12.6 cycles/byte | 1–37% over opt3 everywhere; 2–8% over opt4 except large aligned copies at chunk 127, where opt4 stays 2–24% ahead |
 
 ## Layout
 
