@@ -70,7 +70,10 @@ jx1_decompress:
         movea.l sp,a5
         move.l  #$7fffffff,d0           ; budget covers any stream
         bsr     jx1_init
+.drain:                                 ; Java: while (resume()) {}
         bsr     jx1_resume
+        tst.w   d0                      ; resume returns moveq 0/1, so a word test suffices
+        bne     .drain
         lea     ctx_size(sp),sp
         movea.l (sp)+,a5
         rts
