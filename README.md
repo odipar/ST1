@@ -36,7 +36,14 @@ Additions/differences to the original:
   [68k/jx1_68000_opt2_m.S](68k/jx1_68000_opt2_m.S) (308 bytes) further inlines
   `get_bit` and `take_budget` as macros, removing 34 cycles of bsr/rts overhead per
   bit read and per operation: 27–29% fewer cycles on parse-heavy data, 14–15% on
-  text, 4–7% on copy-dominated data vs opt2
+  text, 4–7% on copy-dominated data vs opt2.
+  [68k/jx1_68000_opt3.S](68k/jx1_68000_opt3.S) (284 bytes) instead restructures the
+  control flow like the z80 `dzx1_standard.asm` and `unzx0_68000.S`: the only bit-queue
+  refill lives in the gamma reader (a ZX1 stream can only run the queue empty on a
+  continuation bit), transition and data bits are bare `add.b`, and one shared
+  `resume_op` body holds the single `take_budget` — no macros, no duplicated code,
+  1–28% faster than opt2 and 1–7% behind opt2_m at chunks 16+ (tiny chunks pay the
+  shared-body tax: down to ~2% slower than opt2 on barely-compressible data)
 
 ## Layout
 
