@@ -329,3 +329,35 @@ work, and a ~20-25% ratio cost on typical data (RLE remains its worst case:
 505 bytes vs 7). Verified: Java round-trips at chunks 8/16/32/127, per-call
 emission, a grammar-aware refill-invariant checker, and the 68k against the
 Java oracle on all 13 corpora at k = 1/4/8 with d4 preservation.
+
+## Round 4: decode-cost-aware parsing, RLE fills at X=16, table layout
+
+**OptimizerDcaw (kept, with a scientific finding).** `OptimizerDcaw.java` runs
+the standard optimal-parse DP with each op scored as
+`(bits << 8) + lambda * decodeCycles(op)`, using the 68k decoders'
+parse-variant cycle costs (per-op dispatch, gamma, offset decode; per-byte
+copy cycles drop out). A corrector pass rewrites the chain with true bit
+counts, so it feeds the stock `Compressor` and produces fully
+format-compatible streams; `lambda = 0` reproduces the bit-optimal sizes
+exactly. The finding: **the bit-optimal ZX1 parse is already nearly
+decode-optimal** - lambda 4..24 changes almost nothing, and beyond that every
+~1% of decode speed costs ~2-2.6% of size (word-soup: +4.6% cycles for +11.7%
+size at lambda 48; lambda 64 degenerates toward literals: +33% cycles for
++133% size). Bits and decoder cycles correlate too strongly for a free lunch;
+the knob exists for callers who value decode speed over size.
+
+**RLE word fills at X = 16 (negative result, reverted).** A match-body fill
+for offsets 1-2 (pattern latched from the two freshly written output bytes,
+parked in an address register, stored through a word ladder at ~4.6 c/b) was
+implemented, verified - the even/odd alignment audit caught a real parity bug
+in the first version - and measured: **slower everywhere** (rle-32k -2.6%,
+word-soup -5.6%, text -8.2%). With the 32-step byte ladder already running a
+flat ~12 c/b with zero dbf passes for n <= 16, the fill's margin at chunk-16
+block sizes (~15 cycles) cannot pay for a gate on every match block. Fills
+need blocks >= 32 (consistent with fill32); the parity-gate techniques are
+recorded here for that future case.
+
+**two_byte next to gtab (kept).** Relocating the two-byte offset decode to
+sit before the table restores the base-register-free
+`add.w gtab(pc,d0.w),d3` (the entry rides the existing bcs, only the return
+pays a bra.w): +0.63% word-soup, +0.44% text, ~0 elsewhere, no size change.

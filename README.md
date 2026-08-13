@@ -65,6 +65,12 @@ per-chunk work as a callback: **+27–30.6% over opt7 at chunk 16** with batches
 of 4–8 chunks. The SMC variants require RAM code, a single active context, and
 a plain 68000.
 
+`OptimizerDcaw` (decode-cost-aware) scores the optimal-parse DP with
+`bits + λ·decode-cycles`, producing format-compatible streams tuned for decoder
+speed. Measured finding: the bit-optimal parse is already nearly decode-optimal —
+beyond λ≈24, each ~1% of decode speed costs ~2–2.6% of size. λ=0 is bit-exact
+with `Optimizer`.
+
 There is also a **chunk-aligned format variant** (`CompressorChunked` /
 `DecompressorChunked` in Java, [68k/jx1_68000_chunked.S](68k/jx1_68000_chunked.S)):
 no op crosses a chunk boundary, so its decoder needs no budget clamp and no
