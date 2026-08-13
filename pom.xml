@@ -19,6 +19,8 @@
         <!-- Every package is null-marked and enforced. -->
         <nullaway.packages>org.jx1</nullaway.packages>
         <nullaway.severity>ERROR</nullaway.severity>
+        <!-- CLI arguments for exec:exec@jx1 / exec:exec@djx1 (-Dargs="..."). -->
+        <args></args>
     </properties>
 
     <dependencies>
@@ -78,6 +80,37 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
+            </plugin>
+            <plugin>
+                <!-- The CLIs, runnable from Maven in a forked JVM so -ea is
+                     on (malformed-input validation uses asserts):
+                       mvn -q compile exec:exec@jx1  -Dargs="input output.zx1"
+                       mvn -q compile exec:exec@djx1 -Dargs="input.zx1 output" -->
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>jx1</id>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>java</executable>
+                            <commandlineArgs>-ea -cp %classpath org.jx1.Jx1 ${args}</commandlineArgs>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>djx1</id>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>java</executable>
+                            <commandlineArgs>-ea -cp %classpath org.jx1.Djx1 ${args}</commandlineArgs>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

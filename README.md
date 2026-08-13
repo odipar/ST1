@@ -80,6 +80,14 @@ java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] input [output.zx1]
 java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
 ```
 
+or straight from Maven (a forked JVM with `-ea`, so assert-based validation
+is on):
+
+```
+mvn -q compile exec:exec@jx1  -Dargs="[-f] [-b] [-q] [-mN] input [output.zx1]"
+mvn -q compile exec:exec@djx1 -Dargs="[-f] [-mN] input.zx1 [output]"
+```
+
 See [c/zx1/src](c/zx1/src) for the original source code
 
 ## License
