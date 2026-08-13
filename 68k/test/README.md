@@ -9,11 +9,12 @@ measure decode time with the system's 200 Hz tick:
 * [jx1_hatari.S](jx1_hatari.S) — [../jx1_68000.S](../jx1_68000.S), the linear
   decompressor
 * [jx1_hatari_ring.S](jx1_hatari_ring.S) — the ring decompressors, streaming
-  each corpus through several ring/chunk shapes. It builds twice:
+  each corpus through several ring/chunk shapes. It builds three times:
   `-dRINGMOD=0` for [../jx1_68000_ring.S](../jx1_68000_ring.S) with dividing
   and non-dividing shapes, `-dRINGMOD=1` for
-  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) with the dividing shapes
-  its contract requires. Nothing is accumulated: each call's output is
+  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) and `-dRINGMOD=2` for
+  [../jx1_68000_ring_mod_opt.S](../jx1_68000_ring_mod_opt.S), both with the
+  dividing shapes their contract requires. Nothing is accumulated: each call's output is
   compared against the expected image as it is drained, and the wrap is
   detected the way the interface intends (`a1 == a4`). The point of the
   feature is visible here — 32000 bytes decompressed through a 256-byte
@@ -162,6 +163,23 @@ optimisation on hardware independently of the model**: at identical corpora,
 ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
 190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
 +3.4% the model predicted — agreement within the ±1 tick resolution.
+
+`jx1_68000_ring_mod_opt.S`, the cycle-tuned build of the same contract, on the
+same shape — and the three ring rows together confirm each optimisation step
+on hardware, independently of the model:
+
+| corpus | ring | ring_mod | ring_mod_opt | mod_opt vs mod |
+|---|---|---|---|---|
+| text | 195 | 190 | 176 | +7.4% |
+| wordsoup | 228 | 224 | 215 | +4.0% |
+| farmatch | 199 | 192 | 175 | +8.9% |
+| period129 | 243 | 235 | 215 | +8.5% |
+| allsame | 232 | 225 | 206 | +8.4% |
+| rle32k | 218 | 210 | 192 | +8.6% |
+| maxoffset | 220 | 212 | 189 | +10.8% |
+
+(ticks, ring 1024, chunk 16, same corpora and calibration). The measured
++4.0–10.8% sits against the +4.8–11.0% the cycle model predicted.
 
 **The model holds.** Real ST decode time runs **+4.3% to +10.0%** above the
 idealized 68000 cycle counts (mean +7.4%) — the gap is interrupt service and
