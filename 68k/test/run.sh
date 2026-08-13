@@ -17,6 +17,9 @@ TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 python3 gendata.py
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S
 
+# --disable-video runs Hatari headless (no window); it does not change what is
+# emulated - the shifter still contends for the bus, and the measured ticks are
+# identical to a windowed run.
 exec "$HATARI" --tos "$TOS" --machine st --cpuclock 8 --cpu-exact on \
     --compatible on --memsize 4 --sound off --conout 2 --fast-forward on \
-    --run-vbls 2500 --log-level fatal JX1TEST.PRG
+    --disable-video 1 --run-vbls 2500 --log-level fatal JX1TEST.PRG

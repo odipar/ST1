@@ -66,4 +66,6 @@ ratios of 1.30–2.21 against 1.32–2.31 measured.
 
 Measurement resolution is ±1 tick, i.e. 0.4–1.3% per figure. Hatari settings:
 `--machine st --cpuclock 8 --cpu-exact on --compatible on` (cycle-exact 68000
-with prefetch).
+with prefetch), plus `--disable-video 1` to run headless — that flag only
+suppresses the host window, the shifter still contends for the bus and every
+measured tick is identical to a windowed run.
