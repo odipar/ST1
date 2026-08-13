@@ -123,6 +123,22 @@ pointer never wraps *during* a call, so a full buffer simply shows up as
         bne.s   .chunk
 ```
 
+Decoding the same stream, the ring costs this much over the linear version:
+
+| chunk X | ring overhead |
+|---|---|
+| 16 | +13–19% |
+| 64 | +6–12% |
+| 127 | +4–11% |
+
+The ring's work is **per call and per match segment, never per byte** — one
+clamp at entry, plus a source recompute and clamp for each match — so the
+overhead is set by the chunk size that amortizes it and is essentially
+independent of N (the three rows above move by less than 0.5 points across
+1024-, 4096- and 65536-byte rings). Larger chunks are close to free; a
+16-byte chunk pays the entry clamp every 16 bytes. A small ring also costs
+compression ratio, since offsets are capped at N.
+
 A buffer of N bytes supports back-references up to exactly N, so compress with
 `-mN`. The entry clamps the call's budget to the room left in the buffer, so
 the destination can never reach the buffer end *inside* a call — only exactly

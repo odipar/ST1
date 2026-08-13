@@ -33,7 +33,11 @@
 ;    jx1_68000.S: a ring costs no context at all.
 ;
 ; What is left of the ring is one clamp per call and one clamp per match
-; segment. A copy segment still stops where the match source reaches the end
+; segment - work per CALL and per MATCH, never per byte, so the overhead over
+; jx1_68000.S is set by the chunk size that amortizes it and is essentially
+; independent of the buffer size: +13-19% at chunk 16, +6-12% at 64, +4-11%
+; at 127, moving by less than half a point across 1024-, 4096- and
+; 65536-byte rings. A copy segment still stops where the match source reaches the end
 ; of the buffer, so the rolled-out ladder needs no bounds test, and the
 ; source is recomputed from the destination per segment (source =
 ; dst - offset, + N when that falls below the buffer).
