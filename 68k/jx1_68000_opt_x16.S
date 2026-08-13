@@ -237,19 +237,9 @@ more_chunks_lit:
 new_offset:                             ; d3.w is provably 0 here (the dead
         move.b  (a0)+,d3                ; moveq of earlier variants is gone);
         lsr.b   #1,d3                   ; carry = low bit selects the form
-        bcs.s   two_byte
+        bcs.w   two_byte                ; (.w: the block lives next to its table
+                                        ; so the lookup needs no base register)
         sub.w   #128,d3                 ; -offset = value/2 - 128 (never >= 0)
-        bra.s   got_offset
-two_byte:
-        add.b   d3,d3                   ; low & 254
-        moveq   #0,d0
-        move.b  (a0)+,d0                ; high byte indexes G (a 256-word table):
-        add.w   d0,d0                   ; -offset = (low & 254) + G[high]
-        lea     gtab(pc),a2
-        add.w   0(a2,d0.w),d3
-        bge.w   end_marker              ; -offset >= 0 is the end marker
-                                        ; (.w: out of short range; taken Bcc
-                                        ; costs 10 cycles at either width)
 got_offset:
         lea     match_lea+2(pc),a2      ; SMC: source displacement = -offset;
         move.w  d3,(a2)                 ; a whole gamma parse runs before
@@ -362,6 +352,15 @@ end_marker:                             ; State.DONE
         movem.l d3/a0-a1,-(a5)
         moveq   #0,d0                   ; fully processed
         rts
+
+two_byte:                               ; placed next to gtab: add.w reaches the
+        add.b   d3,d3                   ; table pc-relatively, no lea needed
+        moveq   #0,d0
+        move.b  (a0)+,d0                ; high byte indexes G (a 256-word table):
+        add.w   d0,d0                   ; -offset = (low & 254) + G[high]
+        add.w   gtab(pc,d0.w),d3
+        bge.w   end_marker              ; -offset >= 0 is the end marker (.w)
+        bra.w   got_offset              ; (.w: back to the offset patch)
 
 ; G[H] = (H>>1)*256 + (H&1) - 32512, so that -offset = (L & 254) + G[H].
         even
