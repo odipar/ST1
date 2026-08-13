@@ -8,43 +8,40 @@
 ; commercially, as long as your documentation indicates that you used
 ; ZX1/jx1 (see LICENSE).
 ;
-; jx1_68000.S writes to a linear destination and reads matches out of it, so
-; the output IS the window and memory use grows with the output. This is the
-; port of the Java Decompressor's ring buffer: output streams through a
-; caller-supplied buffer of N bytes and memory use is bounded by N, not by
-; the output. A buffer of N bytes supports back-references up to exactly N
-; (compress with -mN).
+; The port of the Java Decompressor's ring buffer: output streams through a
+; caller-supplied buffer of N bytes, so memory use is bounded by N and not by
+; the size of the output. A buffer of N bytes supports back-references up to
+; exactly N, so compress with -mN.
 ;
-; There is no flip callback and no third return code: jx1_resume returns 0
-; (done) and 1 (more), exactly like jx1_68000.S. The caller has to drain
-; after every call anyway, so NOT reporting the buffer-full event is what
-; makes the ring bookkeeping collapse:
+; Three deliberate choices shape everything below.
 ;
-; 1. THE BUDGET CARRIES THE RING. The entry clamps this call's budget to the
-;    room left in the buffer, so the destination CANNOT reach the end of the
-;    buffer inside a call - only exactly as the budget runs out. Every
-;    per-segment destination clamp, the post-copy wrap test, and the special
-;    case for a flip landing on an op's last byte all vanish. The buffer is
-;    wrapped once, at the next entry, where the room is computed anyway.
+; 1. NO FLIP CALLBACK AND NO THIRD RETURN CODE. jx1_resume returns 0 (done)
+;    and 1 (more). The caller has to inspect the write pointer after every
+;    call anyway, so it can see a full buffer for itself - and being free of
+;    any duty to STOP at the buffer end is what lets the rest collapse.
 ;
-; 2. THE RING BOUNDS ARE NOT STATE. The caller holds them - it needs them to
-;    drain - so it passes them in a3/a4 (read-only) rather than the
-;    decompressor storing them. The context is back to the 15 bytes of
-;    jx1_68000.S: a ring costs no context at all.
+; 2. THE BUDGET CARRIES THE RING. The entry clamps this call's budget to the
+;    room left in the buffer. The destination therefore cannot reach the end
+;    of the buffer inside a call - only exactly as the budget runs out - so
+;    no copy needs a destination bounds test, and the buffer is wrapped once,
+;    at the next entry, where the room is computed anyway. What remains of
+;    the ring is one clamp per call and one clamp per match segment: work per
+;    CALL and per MATCH, never per byte.
 ;
-; What is left of the ring is one clamp per call and one clamp per match
-; segment - work per CALL and per MATCH, never per byte, so the overhead over
-; jx1_68000.S is set by the chunk size that amortizes it and is essentially
-; independent of the buffer size: +13-19% at chunk 16, +6-12% at 64, +4-11%
-; at 127, moving by less than half a point across 1024-, 4096- and
-; 65536-byte rings. A copy segment still stops where the match source reaches the end
-; of the buffer, so the rolled-out ladder needs no bounds test, and the
-; source is recomputed from the destination per segment (source =
-; dst - offset, + N when that falls below the buffer).
+; 3. THE RING BOUNDS ARE NOT STATE. The caller already holds them - it needs
+;    them to drain - so it passes them read-only in a3/a4 instead of the
+;    decompressor storing and reloading them. The context is 15 bytes: the
+;    ring costs none.
 ;
-; The caller drains after every call, and detects the wrap itself - the write
-; pointer never wraps during a call, so it only has to notice that the
-; buffer is now full:
+; A match source running into the end of the buffer still splits a copy into
+; segments, so the rolled-out ladder itself never needs a bounds test. The
+; source is recomputed from the destination for each segment (source =
+; dst - offset, + N when that falls below the buffer) rather than carried,
+; which also makes a resumed match cost nothing extra.
+;
+; The caller drains after every call and detects the wrap itself - the write
+; pointer never wraps during a call, so a full buffer simply shows up as the
+; write pointer reaching the end:
 ;
 ;       prev = ring
 ;   .loop:
@@ -62,40 +59,13 @@
 ; buffer produces FEWER than chunkSize bytes; a caller must use the write
 ; pointer, not an assumed chunk size.
 ;
-; Measured, and deliberately NOT done:
-;
-; - Reporting the flip with a third return code (2 = buffer wrapped) forces
-;   the decompressor to STOP at the buffer end, which brings back a
-;   destination clamp on every copy segment, a wrap test after every copy,
-;   a special case for a flip landing on an op's last byte, and 8 bytes of
-;   context for the ring bounds. That version measured 3.2-6.1% slower and
-;   14 bytes larger.
-;
-; - Specialising for power-of-two buffer and chunk sizes (X then divides N,
-;   so the destination clamp can be dropped) measured +4.1-4.5% over that
-;   version - not worth a divisibility rule the caller must honour, and the
-;   clamp-the-budget trick above beats it anyway. Wrapping the source by
-;   masking instead of comparing measured SLOWER on a 68000: and.l (8) plus
-;   lea 0(An,Dn.l) (12) costs more than the compare and rarely-taken branch
-;   it replaces (a not-taken Bcc is 8).
-;
-; - Allowing the destination to overrun into a buffer of N + chunkSize bytes
-;   removes the entry clamp (~12 cycles a call) but breaks the SOURCE rule:
-;   bytes in the overrun are logically positions N, N+1..., so a source
-;   reading past the end is correct inside the overrun window and wrong
-;   outside it, and the clamp has to know which. Concretely, an offset-1 run
-;   crossing the end reaches source == end with room 0 and stalls. Making
-;   the slack a true mirror of the first chunkSize bytes fixes reads but
-;   costs more code to keep in sync than it saves.
-;
 ; Assumptions, undefined when violated:
 ;
 ;   1. no single literal run or match is longer than 32768 bytes
 ;   2. the chunk size is 1..127
 ;   3. no back-reference offset exceeds the ring buffer size N
 ;
-; The context must be word-aligned and is 15 bytes (16 with padding) - the
-; same block, with the same layout, as jx1_68000.S.
+; The context must be word-aligned and is 15 bytes (16 with padding).
 ;
 ; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
 ; a5 = context and the ring bounds a3/a4 untouched. (d4 carries the op
