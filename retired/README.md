@@ -4,7 +4,9 @@
 > decompressor; the other seventeen variants and this README moved to
 > `retired/`. This file is kept for its complete variant tables, measured
 > speed figures, and the pick guide. opt7 itself still lives (renamed
-> `jx1_68000.S`) at [../68k/jx1_68000.S](../68k/jx1_68000.S); all other
+> `jx1_68000.S`) at [../68k/jx1_68000.S](../68k/jx1_68000.S), though it has
+> been optimised further since - the figures in the tables below describe it
+> as opt7 was, at 324 bytes, not as it stands now; all other
 > variant links below point at their retired copies. The current README is
 > at [../README.md](../README.md).
 

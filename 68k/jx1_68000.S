@@ -45,7 +45,7 @@ ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed, so the
                 bra.w   jx1_resume
 
 ; -----------------------------------------------------------------------------
-; jx1_init: a0 = compressed data, a1 = destination, d0.b = chunk size 1..127,
+; jx1_init: a0 = compressed data, a1 = destination, d0.w = chunk size 1..127,
 ;           a5 = word-aligned context block of ctx_size bytes.
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------

@@ -62,7 +62,7 @@ spot between speed, size, and readability:
 The decompressor is position-independent and has no global state: everything
 lives in a caller-supplied context block of 16 bytes, which
 must be **word-aligned**. `jx1_init` takes the stream in `a0`, the destination
-in `a1`, the chunk size in `d0.b` (1..127) and the context in `a5`; each
+in `a1`, the chunk size in `d0.w` (1..127) and the context in `a5`; each
 `jx1_resume` then emits at most one chunk and returns `d0 = 0` once the stream
 is fully processed, leaving `a1` at the current end of output:
 

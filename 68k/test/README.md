@@ -31,8 +31,8 @@ headless with console output on stdout.
 
 > **`+o3` matters.** `jx1_68000.S` writes `move.l d1,ctx_packed(a5)` with
 > `ctx_packed = 0`; vasm folds `0(a5)` to `(a5)` on its own, rmac only with
-> `+o3`. With the flag both assemblers emit byte-identical 324-byte output —
-> without it, rmac's is 326.
+> `+o3`. With the flag both assemblers emit byte-identical 320-byte output —
+> without it, rmac's is 322.
 
 ## The corpora
 
