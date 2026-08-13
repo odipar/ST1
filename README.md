@@ -36,6 +36,7 @@ only in where the output goes:
 |---|---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 324 B | 15 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 B | 15 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 324 B | 15 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
 Both are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -152,13 +153,25 @@ into the buffer end still splits the copy into segments, so the rolled-out
 ladder itself never needs a bounds test.
 
 A call that runs into the end of the buffer therefore produces fewer than X
-bytes, so in general use the write pointer rather than an assumed chunk size.
-**Making N a multiple of X removes that case**: `dst − start` is then a
-multiple of X at every entry, so the room is too and the clamp never bites —
-every call emits exactly X bytes and returns 1, except the final one, which
-returns 0 with the last `output mod X` bytes (a full chunk when the output
-divides evenly). Callers wanting fixed-size blocks should size the buffer
-that way.
+bytes, so use the write pointer rather than an assumed chunk size.
+
+### When N is a multiple of X
+
+[jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is the same decompressor
+with that divisibility as a **requirement**, and spends it. `dst − start` is
+then a multiple of X at every entry — it starts at 0, a call returning 1 wrote
+exactly one chunk, and a full buffer restarts at 0 — so the room is always a
+whole number of chunks and never fewer than one. The budget therefore needs
+no clamping at all: the entry drops the room arithmetic and keeps a single
+compare that restarts a full buffer at its first byte.
+
+**324 bytes (12 less), and 1.5–3.4% faster at chunk 16** — the ring overhead
+over the linear decompressor falls from +13–19% to +9–15%. Every call also
+emits exactly X bytes and returns 1, except the final one, which returns 0
+with the last `output mod X` bytes, so a caller wanting fixed-size blocks
+gets them for free. Feeding it a chunk that does not divide the buffer runs
+the destination past the end, so use `jx1_68000_ring.S` when the caller
+cannot promise the ratio.
 
 Validated on real 68000 hardware timing alongside the linear version (see
 [68k/test/](68k/test/)): every corpus byte-checked as it is drained through

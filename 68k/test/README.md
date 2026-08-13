@@ -8,9 +8,12 @@ measure decode time with the system's 200 Hz tick:
 
 * [jx1_hatari.S](jx1_hatari.S) — [../jx1_68000.S](../jx1_68000.S), the linear
   decompressor
-* [jx1_hatari_ring.S](jx1_hatari_ring.S) —
-  [../jx1_68000_ring.S](../jx1_68000_ring.S), streaming each corpus through
-  five ring/chunk shapes. Nothing is accumulated: each call's output is
+* [jx1_hatari_ring.S](jx1_hatari_ring.S) — the ring decompressors, streaming
+  each corpus through several ring/chunk shapes. It builds twice:
+  `-dRINGMOD=0` for [../jx1_68000_ring.S](../jx1_68000_ring.S) with dividing
+  and non-dividing shapes, `-dRINGMOD=1` for
+  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) with the dividing shapes
+  its contract requires. Nothing is accumulated: each call's output is
   compared against the expected image as it is drained, and the wrap is
   detected the way the interface intends (`a1 == a4`). The point of the
   feature is visible here — 32000 bytes decompressed through a 256-byte
@@ -76,6 +79,12 @@ matters:
 | R256/127 | 2 | short calls at the wrap |
 | R1000/16 | 8 | short calls at the wrap (and a ring that is not a power of two) |
 | R1024/127 | 8 | short calls at the wrap |
+
+`jx1_68000_ring_mod.S` requires the chunk to divide the ring, so its build
+runs only dividing shapes — 256/16, 256/64, 1000/125, 1016/127, 1024/16,
+1024/64, seven corpora, 42 configurations — and every one of them must report
+`OKf`. It does, which is the fixed-size-output property confirmed on
+hardware.
 
 Each call that returns 1 must produce exactly the chunk size — unless it ran
 into the end of the buffer, which the harness requires to coincide with the

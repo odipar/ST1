@@ -60,19 +60,19 @@ start:
         lea     m_sp,a0
         bsr     puts
 
-        move.l  #RING_SMALL,d6
-        moveq   #16,d7
+        clr.w   shapeidx
+.shape:
+        lea     shapes,a0
+        move.w  shapeidx,d0
+        lsl.w   #3,d0
+        adda.w  d0,a0
+        move.l  (a0)+,d6                        ; ring size (0 ends the table)
+        beq.s   .shapesdone
+        move.l  (a0),d7                         ; chunk size
         bsr     verify_ring
-        moveq   #127,d7
-        bsr     verify_ring
-        move.l  #RING_ODD,d6
-        moveq   #16,d7
-        bsr     verify_ring
-        move.l  #RING_BIG,d6
-        moveq   #16,d7
-        bsr     verify_ring
-        moveq   #127,d7
-        bsr     verify_ring
+        addq.w  #1,shapeidx
+        bra.s   .shape
+.shapesdone:
         bsr     crlf
         lea     CASE_SIZE(a6),a6
         bra     .case
@@ -269,11 +269,32 @@ time_ring:
         bra     crlf
 
 ; ------------------------------------------------------------ the decompressor
+    .if RINGMOD
+        include "jx1_68000_ring_mod.S"
+    .else
         include "jx1_68000_ring.S"
+    .endif
         include "hatari_util.inc"
 
         .data
+    .if RINGMOD
+m_banner:   dc.b    "JX1 ST RING_MOD TEST",13,10,0
+shapes:     dc.l    RING_SMALL,16                   ; every shape divides:
+            dc.l    RING_SMALL,64                   ; this build requires it
+            dc.l    1000,125
+            dc.l    1016,127
+            dc.l    RING_BIG,16
+            dc.l    RING_BIG,64
+            dc.l    0
+    .else
 m_banner:   dc.b    "JX1 ST RING TEST",13,10,0
+shapes:     dc.l    RING_SMALL,16                   ; dividing and non-dividing
+            dc.l    RING_SMALL,127                  ; ratios both allowed here
+            dc.l    RING_ODD,16
+            dc.l    RING_BIG,16
+            dc.l    RING_BIG,127
+            dc.l    0
+    .endif
 m_calib:    dc.b    "CALIB ",0
 m_done:     dc.b    "DONE",13,10,0
 m_sp:       dc.b    " ",0
@@ -298,6 +319,7 @@ expptr:     ds.l    1
 expleft:    ds.l    1
 retcode:    ds.w    1
 nshort:     ds.w    1
+shapeidx:   ds.w    1
 sizebad:    ds.b    1
         even
 ctx:        ds.b    16                          ; jx1 context (15 bytes + pad)
