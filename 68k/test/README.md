@@ -29,10 +29,12 @@ emulator rig uses, same RNG stream, plus a `-m256` stream per corpus for the
 ring), assembles both programs with `rmac -p +o3`, and runs them under Hatari
 headless with console output on stdout.
 
-> **`+o3` matters.** `jx1_68000.S` writes `move.l d1,ctx_packed(a5)` with
-> `ctx_packed = 0`; vasm folds `0(a5)` to `(a5)` on its own, rmac only with
-> `+o3`. With the flag both assemblers emit byte-identical 320-byte output —
-> without it, rmac's is 322.
+> **On `+o3`:** it used to matter — `jx1_68000.S` wrote
+> `move.l d1,ctx_packed(a5)` with `ctx_packed = 0`, which vasm folded to
+> `(a5)` on its own and rmac only with `+o3`. The packed `movem.l`
+> initializer removed that operand, so rmac and vasm now agree byte for byte
+> either way. The flag is kept because it costs nothing and the next such
+> operand would otherwise cost two bytes silently.
 
 ## The corpora
 
@@ -120,50 +122,50 @@ size X.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
-| text | 28 | 360 | 16 | 14520 | 16000 | +10.2% |
-| text | 28 | 360 | 127 | 8216 | 8800 | +7.1% |
-| wordsoup | 818 | 2925 | 16 | 217988 | 236000 | +8.3% |
-| wordsoup | 818 | 2925 | 127 | 171258 | 182667 | +6.7% |
-| farmatch | 212 | 2900 | 16 | 97562 | 106667 | +9.3% |
-| farmatch | 212 | 2900 | 127 | 47324 | 50000 | +5.7% |
-| period129 | 138 | 1032 | 16 | 35892 | 39400 | +9.8% |
-| period129 | 138 | 1032 | 127 | 18258 | 19400 | +6.3% |
-| allsame | 6 | 1000 | 16 | 34060 | 37400 | +9.8% |
-| allsame | 6 | 1000 | 127 | 16620 | 17600 | +5.9% |
-| rle32k | 7 | 32000 | 16 | 1057072 | 1160000 | +9.7% |
-| rle32k | 7 | 32000 | 127 | 502514 | 526667 | +4.8% |
-| maxoffset | 32589 | 33012 | 16 | 1085700 | 1193333 | +9.9% |
-| maxoffset | 32589 | 33012 | 127 | 542328 | 566667 | +4.5% |
+| text | 28 | 360 | 16 | 14660 | 16000 | +9.1% |
+| text | 28 | 360 | 127 | 8196 | 8800 | +7.4% |
+| wordsoup | 818 | 2925 | 16 | 216648 | 233333 | +7.7% |
+| wordsoup | 818 | 2925 | 127 | 168646 | 180000 | +6.7% |
+| farmatch | 212 | 2900 | 16 | 98976 | 106667 | +7.8% |
+| farmatch | 212 | 2900 | 127 | 47466 | 50000 | +5.3% |
+| period129 | 138 | 1032 | 16 | 36368 | 39400 | +8.3% |
+| period129 | 138 | 1032 | 127 | 18286 | 19400 | +6.1% |
+| allsame | 6 | 1000 | 16 | 34536 | 37400 | +8.3% |
+| allsame | 6 | 1000 | 127 | 16656 | 17600 | +5.7% |
+| rle32k | 7 | 32000 | 16 | 1073044 | 1160000 | +8.1% |
+| rle32k | 7 | 32000 | 127 | 504502 | 526667 | +4.4% |
+| maxoffset | 32589 | 33012 | 16 | 1101916 | 1193333 | +8.3% |
+| maxoffset | 32589 | 33012 | 127 | 544112 | 566667 | +4.1% |
 
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
 several times the buffer it streams through — lands in the same band,
-**+8.7% to +10.3%** over its model (mean +9.5%):
+**+7.6% to +8.9%** over its model (mean +8.2%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16494 | 18200 | +10.3% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 267470 | 290667 | +8.7% |
-| farmatch | 410 | 2900 | 1024 | 16 | 110656 | 121333 | +9.6% |
-| period129 | 138 | 1032 | 1024 | 16 | 40696 | 44600 | +9.6% |
-| allsame | 6 | 1000 | 1024 | 16 | 38900 | 42600 | +9.5% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1216564 | 1326667 | +9.1% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1198166 | 1313333 | +9.6% |
+| text | 28 | 360 | 1024 | 16 | 16622 | 18100 | +8.9% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 266016 | 288000 | +8.3% |
+| farmatch | 410 | 2900 | 1024 | 16 | 112084 | 120667 | +7.7% |
+| period129 | 138 | 1032 | 1024 | 16 | 41168 | 44600 | +8.3% |
+| allsame | 6 | 1000 | 1024 | 16 | 39372 | 42600 | +8.2% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1232532 | 1326667 | +7.6% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1214556 | 1313333 | +8.1% |
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
 spends that on a cheaper entry, measured on the same shape:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16034 | 17600 | +9.8% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 263786 | 286667 | +8.7% |
-| farmatch | 410 | 2900 | 1024 | 16 | 106992 | 116667 | +9.0% |
-| period129 | 138 | 1032 | 1024 | 16 | 39384 | 43000 | +9.2% |
-| allsame | 6 | 1000 | 1024 | 16 | 37640 | 41200 | +9.5% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1176192 | 1280000 | +8.8% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1156502 | 1260000 | +8.9% |
+| text | 28 | 360 | 1024 | 16 | 16162 | 17500 | +8.3% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 262332 | 282667 | +7.8% |
+| farmatch | 410 | 2900 | 1024 | 16 | 108420 | 116667 | +7.6% |
+| period129 | 138 | 1032 | 1024 | 16 | 39856 | 43000 | +7.9% |
+| allsame | 6 | 1000 | 1024 | 16 | 38112 | 41000 | +7.6% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1192160 | 1280000 | +7.4% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1172892 | 1260000 | +7.4% |
 
-Same band (+8.7% to +9.8%, mean +9.1%), and the two tables also **confirm the
+Same band (+7.4% to +8.3%, mean +7.7%), and the two tables also **confirm the
 optimisation on hardware independently of the model**: at identical corpora,
 ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
 190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
@@ -174,11 +176,11 @@ spends that on a cheaper entry, on the same shape:
 
 | corpus | ring | ring_mod | ring_mod gain |
 |---|---|---|---|
-| text | 182 | 176 | +3.3% |
-| wordsoup | 218 | 215 | +1.4% |
-| farmatch | 182 | 175 | +3.8% |
+| text | 181 | 175 | +3.3% |
+| wordsoup | 216 | 212 | +1.9% |
+| farmatch | 181 | 175 | +3.3% |
 | period129 | 223 | 215 | +3.6% |
-| allsame | 213 | 206 | +3.3% |
+| allsame | 213 | 205 | +3.8% |
 | rle32k | 199 | 192 | +3.5% |
 | maxoffset | 197 | 189 | +4.1% |
 
@@ -187,8 +189,8 @@ the same entry optimisations, so what the last column shows is the
 divisibility requirement alone, against the +1.5–3.4% the cycle model
 predicted for it.
 
-**The model holds.** Real ST decode time runs **+4.5% to +10.2%** above the
-idealized 68000 cycle counts (mean +7.7%) — the gap is interrupt service and
+**The model holds.** Real ST decode time runs **+4.1% to +9.1%** above the
+idealized 68000 cycle counts (mean +7.0%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
 reference `dbf` loop, whose cycle count is exact by construction, measures
 **+22.6%** over its ideal on the same machine, and a `move.b (a0)+,(a1)+` loop

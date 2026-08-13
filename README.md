@@ -34,9 +34,9 @@ goes, and in what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 320 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 338 B | 16 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 326 B | 16 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 298 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 300 B | 16 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 288 B | 16 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -48,10 +48,10 @@ project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
 chosen). It came out of an 18-variant optimization campaign as the sweet
 spot between speed, size, and readability:
 
-* 320 bytes of position-independent code, 16-byte word-aligned context
+* 298 bytes of position-independent code, 16-byte word-aligned context
 * one body — no macros, no tables, no self-modifying code; runs from ROM,
   unlimited concurrent contexts
-* +32–35% faster than the straight reference port at chunk 16 (+41–52% at
+* +32–36% faster than the straight reference port at chunk 16 (+42–52% at
   chunk 127), measured under a cycle-accurate emulation model
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
