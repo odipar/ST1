@@ -1,4 +1,5 @@
 *.PRG
 *.z
+*.r
 *.e
 data.inc
