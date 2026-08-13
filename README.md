@@ -28,15 +28,16 @@ Additions/differences to the original:
 
 ## The 68k decompressors
 
-Three files, all ported from the Java `Decompressor` state machine, sharing
-the same parser, the same copy engine and the same 15-byte context. They
-differ in where the output goes, and what the caller has to promise:
+Four files, all ported from the Java `Decompressor` state machine, sharing
+the same parser and the same copy engine. They differ in where the output
+goes, and in what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 324 B | 15 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 B | 15 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 324 B | 15 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod_opt.S](68k/jx1_68000_ring_mod_opt.S) | 326 B | 16 B | the same again, tuned for cycles rather than size | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -183,6 +184,19 @@ fixed-size blocks gets them for free — a property the ST harness checks on
 every call, across 42 configurations. Feeding it a chunk that does not divide
 the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
 the caller cannot promise the ratio.
+
+[jx1_68000_ring_mod_opt.S](68k/jx1_68000_ring_mod_opt.S) is that same
+contract spent harder, at 326 bytes: the segment loop's guards move below the
+copy (a call resuming mid-op provably needs neither, since a suspend only
+happens with `remaining ≥ 1` and the budget is a whole chunk again), the op
+state becomes signed so the entry dispatches on the flags the state load
+already set and the in-body tests are `tst` rather than `cmp`, the chunk
+becomes a word field needing no zero-extension, and the suspend path falls
+through. **+4.8–11.0% over `ring_mod`**, measured at +4.0–10.8% on the Atari
+ST. That leaves the ring costing only +3.5–7.4% over the linear
+decompressor — and on `max-offset` it comes out 2.9% *faster*, though that
+last comparison flatters it: these entry optimisations are not in
+`jx1_68000.S`, which could take them too.
 
 Validated on real 68000 hardware timing alongside the linear version (see
 [68k/test/](68k/test/)): every corpus byte-checked as it is drained through
