@@ -51,10 +51,11 @@
 ; (a0)+ literals ladder, and the 256-word offset table (-offset =
 ; (L & 254) + G[H]).
 ;
-; Measured at chunk 16 vs jx1_68000_opt7.S:
-;   plain resume:     +15.9% .. +19.3%
-;   batched k = 4:    +27.5% .. +34.9%
-;   batched k = 8:    +28.8% .. +37.8%   (all six corpora positive)
+; Measured at chunk 16 vs jx1_68000_opt7.S (consolidated cycle model, see
+; the audit section of OPTIMIZATIONS.md):
+;   plain resume:     +16.5% .. +19.4%
+;   batched k = 4:    +27.5% .. +35.3%
+;   batched k = 8:    +28.9% .. +38.2%   (all six corpora positive)
 ;
 ; SMC caveats (by construction): code must live in RAM; SINGLE ACTIVE
 ; CONTEXT (jx1_init re-arms all patched defaults, so sequential streams are
