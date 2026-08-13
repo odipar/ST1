@@ -270,11 +270,7 @@ time_ring:
 
 ; ------------------------------------------------------------ the decompressor
     .if RINGMOD
-      .if RINGMOD-1
-        include "jx1_68000_ring_mod_opt.S"
-      .else
         include "jx1_68000_ring_mod.S"
-      .endif
     .else
         include "jx1_68000_ring.S"
     .endif
@@ -282,11 +278,7 @@ time_ring:
 
         .data
     .if RINGMOD
-      .if RINGMOD-1
-m_banner:   dc.b    "JX1 ST RING_MOD_OPT TEST",13,10,0
-      .else
 m_banner:   dc.b    "JX1 ST RING_MOD TEST",13,10,0
-      .endif
 shapes:     dc.l    RING_SMALL,16                   ; every shape divides:
             dc.l    RING_SMALL,64                   ; this build requires it
             dc.l    1000,125

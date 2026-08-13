@@ -18,7 +18,6 @@ python3 gendata.py
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S                  # linear
 rmac -m68000 -p +o3 -dRINGMOD=0 -i. -i.. -o JX1RING.PRG jx1_hatari_ring.S  # ring
 rmac -m68000 -p +o3 -dRINGMOD=1 -i. -i.. -o JX1RMOD.PRG jx1_hatari_ring.S  # ring_mod
-rmac -m68000 -p +o3 -dRINGMOD=2 -i. -i.. -o JX1ROPT.PRG jx1_hatari_ring.S  # ring_mod_opt
 
 # --disable-video runs Hatari headless (no window); it does not change what is
 # emulated - the shifter still contends for the bus, and the measured ticks are
@@ -31,4 +30,3 @@ run() {
 run JX1TEST.PRG
 run JX1RING.PRG
 run JX1RMOD.PRG
-run JX1ROPT.PRG

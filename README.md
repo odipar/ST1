@@ -22,13 +22,13 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — a resumable 68000 decompressor ported from the Java
-  `Decompressor` state machine, in a linear and two ring-buffer variants, verified
+  `Decompressor` state machine, in a linear and two ring-buffer forms, verified
   byte-identical against Java-compressed streams under cycle-measured emulation and
   on real 68000 hardware timing (Atari ST)
 
 ## The 68k decompressors
 
-Four files, all ported from the Java `Decompressor` state machine, sharing
+Three files, all ported from the Java `Decompressor` state machine, sharing
 the same parser and the same copy engine. They differ in where the output
 goes, and in what the caller has to promise:
 
@@ -36,8 +36,7 @@ goes, and in what the caller has to promise:
 |---|---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 320 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 338 B | 16 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 324 B | 15 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod_opt.S](68k/jx1_68000_ring_mod_opt.S) | 326 B | 16 B | the same again, tuned for cycles rather than size | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 326 B | 16 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -172,44 +171,14 @@ whole number of chunks and never fewer than one. The budget therefore needs
 no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
-**324 bytes, the smallest of the three rings, and 1.5–3.4% faster than the
-general ring was before that ring gained the entry work described below** — the ring overhead
-over the linear decompressor falls from +13–19% to +9–15%. On the Atari ST that measured +1.8–3.7%, agreeing with the model within the
-±1 tick resolution. Note the consequence of the entry optimisations landing
-in the general ring afterwards: `ring_mod` is now the *smallest* ring, not
-the fastest — the general one overtakes it, and `ring_mod_opt` below carries
-both sets of savings.
-
-Every call also emits exactly X bytes and returns 1, except the final one,
-which returns 0 with the last `output mod X` bytes, so a caller wanting
-fixed-size blocks gets them for free — a property the ST harness checks on
-every call, across 42 configurations. Feeding it a chunk that does not divide
-the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
-the caller cannot promise the ratio.
-
-[jx1_68000_ring_mod_opt.S](68k/jx1_68000_ring_mod_opt.S) is that same
-contract spent harder, at 326 bytes: the segment loop's guards move below the
-copy (a call resuming mid-op provably needs neither, since a suspend only
-happens with `remaining ≥ 1` and the budget is a whole chunk again), the op
-state becomes signed so the entry dispatches on the flags the state load
-already set and the in-body tests are `tst` rather than `cmp`, the chunk
-becomes a word field needing no zero-extension, and the suspend path falls
-through. **+4.8–11.0% over `ring_mod`**, measured at +4.0–10.8% on the Atari ST, and
-the fastest of the three. Those same four changes have since been applied to
-`jx1_68000.S` and `jx1_68000_ring.S` as well, which is why the ring's
-overhead table above dropped by roughly a third.
-
-Validated on real 68000 hardware timing alongside the linear version (see
-[68k/test/](68k/test/)): every corpus byte-checked as it is drained through
-256- and 1024-byte rings at chunk 16 and 127 — 32000 bytes decompressed
-through a 256-byte buffer — with measured decode time +8.0–9.2% over the
-cycle model, the same band as the linear decompressor.
-
-The header records three measured alternatives that were rejected: reporting
-the flip with a `2` (forces a stop at the buffer end — 3.2–6.1% slower, 14
-bytes larger, 8 bytes more context), specialising for power-of-two sizes, and
-allowing a bounded overrun into an N+X buffer (which breaks the source rule:
-an offset-1 run crossing the end stalls).
+**326 bytes, and 1.5–3.4% faster than the general ring**, which is the cost
+of that ring's room arithmetic. Every call also emits exactly X bytes and
+returns 1, except the final one, which returns 0 with the last
+`output mod X` bytes, so a caller wanting fixed-size blocks gets them for
+free — a property the ST harness checks on every call, across 42
+configurations. Feeding it a chunk that does not divide the buffer runs the
+destination past the end, so use `jx1_68000_ring.S` when the caller cannot
+promise the ratio.
 
 ### Testing them
 
