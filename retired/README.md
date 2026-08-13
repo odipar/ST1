@@ -47,6 +47,10 @@ single corrected cycle model (see the audit section of
 optimization exploration behind the `opt_*` variants — 18 measured prototypes,
 including insights and negative results).
 
+Speed figures are ranges across six corpora — word-soup (818 bytes in, 2925
+out), text (28/360), far-match (212/2900), all-same (6/1000), max-offset
+(32589/33012) and rle-32k (7/32000) — at the chunk size stated.
+
 | File | Bytes | State | Technique | Speed |
 |---|---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 284 | 22 | reference port, no assumptions; copy 30 cycles/byte, ~335-cycle fixed cost per resume call | baseline |

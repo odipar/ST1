@@ -38,6 +38,16 @@ models before any number below was reported; the opt7 baseline is unaffected):
 
 Positive = fewer cycles than opt7. Corpus columns: ws = word-soup, txt = text,
 fm = far-match, as = all-same, mo = max-offset, rle = rle-32k; 16/127 = chunk.
+Their sizes (stream in -> output out, which is what the cycles are spent on):
+
+| corpus | stream | output |
+|---|---|---|
+| ws = word-soup | 818 | 2925 |
+| txt = text | 28 | 360 |
+| fm = far-match | 212 | 2900 |
+| as = all-same | 6 | 1000 |
+| mo = max-offset | 32589 | 33012 |
+| rle = rle-32k | 7 | 32000 |
 
 ## Flow re-plumbing
 

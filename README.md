@@ -32,10 +32,10 @@ Two files, both ported from the Java `Decompressor` state machine, sharing the
 same parser, the same copy engine and the same 15-byte context. They differ
 only in where the output goes:
 
-| File | Bytes | Output | Entries |
-|---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 324 | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| File | Code | Context | Output | Entries |
+|---|---|---|---|---|
+| [jx1_68000.S](68k/jx1_68000.S) | 324 B | 15 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 B | 15 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 
 Both are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -125,11 +125,15 @@ pointer never wraps *during* a call, so a full buffer simply shows up as
 
 Decoding the same stream, the ring costs this much over the linear version:
 
-| chunk X | ring overhead |
-|---|---|
-| 16 | +13–19% |
-| 64 | +6–12% |
-| 127 | +4–11% |
+| chunk X | N = 1024 | N = 4096 | N = 65536 |
+|---|---|---|---|
+| 16 | +13.1…18.7% | +13.0…18.2% | +13.1…18.1% |
+| 64 | +6.5…11.9% | +6.3…11.2% | +6.2…11.2% |
+| 127 | +4.9…11.3% | +4.4…10.6% | +3.9…10.6% |
+
+(ranges across the six benchmark corpora, 360 to 33012 bytes of output from
+6- to 32589-byte streams; per-corpus sizes and figures are in
+[68k/test/README.md](68k/test/README.md))
 
 The ring's work is **per call and per match segment, never per byte** — one
 clamp at entry, plus a source recompute and clamp for each match — so the
