@@ -1,0 +1,68 @@
+jx1 License
+===========
+
+jx1 is a Java port of the ZX1 data compression format and algorithm, with a
+resumable 68000 decompressor and related experiments. It follows the dual
+licensing structure of the original ZX1 (see c/zx1/LICENSE and the License
+section of c/zx1/README.md):
+
+1. THE COMPRESSOR - the Java compressor and optimal parser (Block, Optimizer,
+   Compressor, Zx1, and the retired compressor experiments), derived from
+   Einar Saukas' optimal C compressor - is available under the BSD 3-Clause
+   License below. In practice this is relevant only if you modify its source
+   code and/or incorporate the compressor within your own products; if you
+   just execute it to compress files, you can simply ignore these conditions.
+
+2. THE DECOMPRESSORS - the Java Decompressor/Dzx1, the 68000 decompressor
+   68k/jx1_68000_opt7.S, and the retired decompressor variants - can be used
+   freely within your own programs (for any platform), even for commercial
+   releases. The only condition is that you must indicate somehow in your
+   documentation that you have used ZX1/jx1.
+
+Attribution
+-----------
+
+* The ZX1 data compression format and algorithm was designed and implemented
+  by Einar Saukas (Copyright (c) 2021), with thanks to introspec/spke. The
+  original C and z80 sources are vendored unmodified under c/zx1/ with their
+  own LICENSE.
+* The additions and differences to the original (custom buffer/backreference
+  sizes, the incremental ring buffer, resumable decompression, the 68000
+  target, and the direction of the optimization campaign - see README.md) are
+  Copyright (c) 2026 Robbert van Dalen.
+* The jx1 code and experiments - the Java port, the 68000 decompressor
+  variants, the emulation/measurement rigs, and the documentation of the
+  optimization campaign (retired/) - were written by Claude (Anthropic's
+  Claude Code), under the direction of Robbert van Dalen.
+
+BSD 3-Clause License (the compressor)
+-------------------------------------
+
+Copyright (c) 2021, Einar Saukas (original ZX1)
+Copyright (c) 2026, Robbert van Dalen (jx1 additions)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
