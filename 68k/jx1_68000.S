@@ -1,33 +1,28 @@
 ; -----------------------------------------------------------------------------
-; jx1_68000_opt7.S - rotated-gamma resumable ZX1 decompressor (68000)
+; jx1_68000.S - JX1: rotated-gamma resumable ZX1 decompressor (68000) v0.1
 ;
-; jx1_68000_opt6.S with get_gamma restructured instead of merely looped:
-; the first continuation bit is peeled off, so a length-1 value falls
-; straight through, and the loop is rotated so that the continue branch
-; (bcs) is itself the back-jump - the 10-cycle unconditional bra per data
-; bit disappears while each pair keeps exactly the same two flag tests.
-; 32 instead of 40 cycles per data bit, on every pair, with no macros and
-; no unrolling; the only duplication is the peeled 8-byte refill block.
-; Both continuation reads keep the refill check (either can be the 8th
-; bit of a group); data bits stay bare per the opt3 invariant.
+; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas (data compression
+; format, algorithm, and the original C/z80 decompressors). Code and the
+; optimization work behind it written by Claude (Anthropic's Claude Code)
+; under Robbert's direction. The decompressor can be used freely within
+; your own programs, even commercially, as long as your documentation
+; indicates that you used ZX1/jx1 (see LICENSE).
 ;
-; Same assumptions as jx1_68000_opt.S, undefined when violated:
+; A resumable port of the Java Decompressor state machine: jx1_resume
+; emits at most one chunk of output per call and picks up mid-op where it
+; left off. 324 bytes, one body, no macros, no tables, no self-modifying
+; code; runs from ROM, any number of concurrent contexts.
+;
+; Assumptions, undefined when violated:
 ;
 ;   1. no single literal run or match is longer than 32768 bytes
 ;   2. the chunk size is 1..127
 ;
-; Measured against jx1_68000_opt6.S: +2.9-3.7% on parse-heavy data (many
-; short gammas), +1.1-2.1% on text, +0.2-0.4% on copy-dominated data -
-; the same gains the discarded unrolled-ladder attempt measured, at 34
-; fewer bytes. 324 bytes.
-;
-;
-
 ; The context must be word-aligned and is 15 bytes (16 with padding).
 ;
 ; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
 ; a5 = context untouched; jx1_decompress additionally uses (but restores)
-; a5. (As in opt3, d4 carries the op state.)
+; a5. (d4 carries the op state.)
 ; -----------------------------------------------------------------------------
 
 
@@ -101,15 +96,20 @@ jx1_resume:
         rts
 
 ; get_gamma: interlaced Elias gamma value in d1.w (assumption: fits a word).
-; Holds the decompressor's only bit-queue refills. The first continuation
-; bit is peeled, and the loop is rotated so the continue branch is the
-; back-jump: no unconditional bra per pair. Java: readInterlacedEliasGamma().
+; Holds the decompressor's only bit-queue refills: gammas are odd-length,
+; transitions are single bits, and the stream opens with a gamma, so
+; continuation bits sit at even bit indices and the queue (refilled every
+; 8th bit) can only empty on one - data and transition bits are read bare,
+; with no refill check. The first continuation bit is peeled (a length-1
+; value falls straight through) and the loop is rotated so the continue
+; branch is the back-jump: no unconditional bra per pair.
+; Java: readInterlacedEliasGamma().
 get_gamma:
         moveq   #1,d1
         add.b   d2,d2                   ; first continuation bit (refill site)
         bne.s   gamma_first
-        move.b  (a0)+,d2                ; refill; ZX1 bit groups always open on a
-        addx.b  d2,d2                   ; continuation bit (see jx1_68000_opt3.S)
+        move.b  (a0)+,d2                ; refill; bit groups always open on a
+        addx.b  d2,d2                   ; continuation bit (see the note above)
 gamma_first:
         bcc.s   gamma_done              ; 0: value is 1, straight through
 gamma_loop:

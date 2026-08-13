@@ -10,12 +10,13 @@ import java.nio.file.Path;
  * Command-line ZX1 decompressor. Java port of {@code dzx1.c} from
  * <a href="https://github.com/einar-saukas/ZX1">ZX1</a> by Einar Saukas.
  */
-public final class Dzx1 {
+public final class Djx1 {
 
-    private Dzx1() {}
+    private Djx1() {}
 
     public static void main(String[] args) {
-        System.out.println("DZX1 v1.5: Data decompressor by Einar Saukas");
+        System.out.println("DJX1: Data decompressor v0.1 by Robbert van Dalen, "
+                + "based on DZX1 v1.5: Data decompressor by Einar Saukas");
 
         // Process hidden optional parameters.
         boolean forcedMode = false;
@@ -49,7 +50,7 @@ public final class Dzx1 {
             outputName = args[i + 1];
         } else {
             Cli.usage("""
-                    Usage: dzx1 [-f] [-mN] input.zx1 [output]
+                    Usage: djx1 [-f] [-mN] input.zx1 [output]
                       -f      Force overwrite of output file
                       -mN     Ring buffer of N bytes (default 65536); N must cover the largest offset""");
             return;

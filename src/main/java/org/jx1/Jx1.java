@@ -8,15 +8,16 @@ import java.nio.file.Path;
  * Command-line ZX1 compressor. Java port of {@code zx1.c} from
  * <a href="https://github.com/einar-saukas/ZX1">ZX1</a> by Einar Saukas.
  */
-public final class Zx1 {
+public final class Jx1 {
 
     public static final int MAX_OFFSET_ZX1 = 32512;
     public static final int MAX_OFFSET_ZX7 = 2176;
 
-    private Zx1() {}
+    private Jx1() {}
 
     public static void main(String[] args) {
-        System.out.println("ZX1 v1.5: Optimal data compressor by Einar Saukas");
+        System.out.println("JX1: Optimal data compressor v0.1 by Robbert van Dalen, "
+                + "based on ZX1 v1.5: Optimal data compressor by Einar Saukas");
 
         // Process optional parameters.
         int skip = 0;
@@ -57,7 +58,7 @@ public final class Zx1 {
             outputName = args[i + 1];
         } else {
             Cli.usage("""
-                    Usage: zx1 [-f] [-b] [-q] [-mN] input [output.zx1]
+                    Usage: jx1 [-f] [-b] [-q] [-mN] input [output.zx1]
                       -f      Force overwrite of output file
                       -b      Compress backwards
                       -q      Quick non-optimal compression

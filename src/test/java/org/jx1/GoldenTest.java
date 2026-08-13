@@ -24,13 +24,13 @@ final class GoldenTest {
     @Test
     void text() {
         assertGolden("f761627261636164f22a6920686f6375732070f4d0bdb8baaf40ffff", 2,
-                compress(TestData.text(), 0, Zx1.MAX_OFFSET_ZX1, false));
+                compress(TestData.text(), 0, Jx1.MAX_OFFSET_ZX1, false));
     }
 
     @Test
     void textWithSkip() {
         assertGolden("dc636164f2a920686f6375732070f4a6d0f6b8eabdffff", 2,
-                compress(TestData.text(), 4, Zx1.MAX_OFFSET_ZX1, false));
+                compress(TestData.text(), 4, Jx1.MAX_OFFSET_ZX1, false));
     }
 
     @Test
@@ -38,7 +38,7 @@ final class GoldenTest {
         // Mirrors the -b mode of the CLI: reverse input, compress backwards, reverse output.
         byte[] input = TestData.text();
         reverse(input);
-        Compressor.Result result = compress(input, 0, Zx1.MAX_OFFSET_ZX1 - 1, true);
+        Compressor.Result result = compress(input, 0, Jx1.MAX_OFFSET_ZX1 - 1, true);
         reverse(result.output());
         assertGolden("0001d0ab466e2e686f0a706f6375732068ce0c6361646162726120a9", 2, result);
     }
@@ -51,7 +51,7 @@ final class GoldenTest {
                 + "eb0c8aead641c58dad569581baeea87c10d40a47902028e61cfdc243d9d16008aabc9fb77cc723a560"
                 + "17e14f1ce8b1698341734a6823ce02043e016b544901214a2ddab82fec85c0b9fe0549c475be5b887b"
                 + "b478afeabd75e8eafdffff", 2,
-                compress(TestData.farMatch(), 0, Zx1.MAX_OFFSET_ZX1, false));
+                compress(TestData.farMatch(), 0, Jx1.MAX_OFFSET_ZX1, false));
     }
 
     @Test
@@ -68,12 +68,12 @@ final class GoldenTest {
                 + "cceb0c8aead641c58dad569581baeea87c10d40a47902028e61cfdc243d9d16008aabc9fb77cc723a5"
                 + "6017e14f1ce8b1698341734a6823ce02043e016b544901214a2ddab82fec85c0b9fe0549c475be5b88"
                 + "7bb4ffff", 4,
-                compress(TestData.farMatch(), 0, Zx1.MAX_OFFSET_ZX7, false));
+                compress(TestData.farMatch(), 0, Jx1.MAX_OFFSET_ZX7, false));
     }
 
     @Test
     void wordSoup() {
-        Compressor.Result result = compress(TestData.wordSoup(), 0, Zx1.MAX_OFFSET_ZX1, false);
+        Compressor.Result result = compress(TestData.wordSoup(), 0, Jx1.MAX_OFFSET_ZX1, false);
         assertEquals(777, result.output().length);
         assertEquals(2, result.delta());
         assertArrayEquals(TestData.wordSoup(), Decompressor.decompress(result.output()));
