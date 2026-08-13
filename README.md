@@ -34,8 +34,8 @@ goes, and in what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 324 B | 15 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 B | 15 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 320 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 338 B | 16 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 324 B | 15 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod_opt.S](68k/jx1_68000_ring_mod_opt.S) | 326 B | 16 B | the same again, tuned for cycles rather than size | `jx1_init`, `jx1_resume` |
 
@@ -49,10 +49,10 @@ project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
 chosen). It came out of an 18-variant optimization campaign as the sweet
 spot between speed, size, and readability:
 
-* 324 bytes of position-independent code, 15-byte word-aligned context
+* 320 bytes of position-independent code, 16-byte word-aligned context
 * one body — no macros, no tables, no self-modifying code; runs from ROM,
   unlimited concurrent contexts
-* +28–32% faster than the straight reference port at chunk 16 (+39–51% at
+* +32–35% faster than the straight reference port at chunk 16 (+41–52% at
   chunk 127), measured under a cycle-accurate emulation model
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
@@ -61,7 +61,7 @@ spot between speed, size, and readability:
 ### Calling it
 
 The decompressor is position-independent and has no global state: everything
-lives in a caller-supplied context block of 15 bytes (16 with padding), which
+lives in a caller-supplied context block of 16 bytes, which
 must be **word-aligned**. `jx1_init` takes the stream in `a0`, the destination
 in `a1`, the chunk size in `d0.b` (1..127) and the context in `a5`; each
 `jx1_resume` then emits at most one chunk and returns `d0 = 0` once the stream
@@ -135,9 +135,9 @@ Decoding the same stream, the ring costs this much over the linear version:
 
 | chunk X | N = 1024 | N = 4096 | N = 65536 |
 |---|---|---|---|
-| 16 | +13.1…18.7% | +13.0…18.2% | +13.1…18.1% |
-| 64 | +6.5…11.9% | +6.3…11.2% | +6.2…11.2% |
-| 127 | +4.9…11.3% | +4.4…10.6% | +3.9…10.6% |
+| 16 | +8.1…15.9% | +7.9…15.3% | +8.0…15.1% |
+| 64 | +4.2…12.8% | +3.9…12.0% | +3.8…12.0% |
+| 127 | +4.2…12.4% | +3.0…11.6% | +2.5…11.6% |
 
 (ranges across the six benchmark corpora, 360 to 33012 bytes of output from
 6- to 32589-byte streams; per-corpus sizes and figures are in
@@ -172,11 +172,13 @@ whole number of chunks and never fewer than one. The budget therefore needs
 no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
-**324 bytes (12 less), and 1.5–3.4% faster at chunk 16** — the ring overhead
-over the linear decompressor falls from +13–19% to +9–15%. On the Atari ST
-the same comparison measures **+1.8–3.7%**, agreeing with the model within
-the ±1 tick resolution, so the gain is confirmed on hardware and not only
-predicted.
+**324 bytes, the smallest of the three rings, and 1.5–3.4% faster than the
+general ring was before that ring gained the entry work described below** — the ring overhead
+over the linear decompressor falls from +13–19% to +9–15%. On the Atari ST that measured +1.8–3.7%, agreeing with the model within the
+±1 tick resolution. Note the consequence of the entry optimisations landing
+in the general ring afterwards: `ring_mod` is now the *smallest* ring, not
+the fastest — the general one overtakes it, and `ring_mod_opt` below carries
+both sets of savings.
 
 Every call also emits exactly X bytes and returns 1, except the final one,
 which returns 0 with the last `output mod X` bytes, so a caller wanting
@@ -192,11 +194,10 @@ happens with `remaining ≥ 1` and the budget is a whole chunk again), the op
 state becomes signed so the entry dispatches on the flags the state load
 already set and the in-body tests are `tst` rather than `cmp`, the chunk
 becomes a word field needing no zero-extension, and the suspend path falls
-through. **+4.8–11.0% over `ring_mod`**, measured at +4.0–10.8% on the Atari
-ST. That leaves the ring costing only +3.5–7.4% over the linear
-decompressor — and on `max-offset` it comes out 2.9% *faster*, though that
-last comparison flatters it: these entry optimisations are not in
-`jx1_68000.S`, which could take them too.
+through. **+4.8–11.0% over `ring_mod`**, measured at +4.0–10.8% on the Atari ST, and
+the fastest of the three. Those same four changes have since been applied to
+`jx1_68000.S` and `jx1_68000_ring.S` as well, which is why the ring's
+overhead table above dropped by roughly a third.
 
 Validated on real 68000 hardware timing alongside the linear version (see
 [68k/test/](68k/test/)): every corpus byte-checked as it is drained through

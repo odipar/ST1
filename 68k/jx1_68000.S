@@ -31,10 +31,13 @@
 ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
 ctx_src         equ     4               ; .l  a0: input position
 ctx_dst         equ     8               ; .l  a1: output position
-ctx_chunk       equ     12              ; .b  chunkSize (X), 1..127
-ctx_bits        equ     13              ; .b  bit buffer
-ctx_state       equ     14              ; .b  State: 0 START, 1 LITERALS, 2 MATCH, 3 DONE
-ctx_size        equ     15
+ctx_chunk       equ     12              ; .w  chunkSize (X), 1..127 (a word: the
+                                        ;     budget is only ever used word-wide,
+                                        ;     so the entry loads it as one)
+ctx_bits        equ     14              ; .b  bit buffer
+ctx_state       equ     15              ; .b  State: $80 START, 0 LITERALS,
+ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed, so the
+                                        ;     entry dispatches on the load's flags
 ctx_alloc       equ     16              ; ctx_size rounded up to keep sp even
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4/8).
@@ -50,12 +53,12 @@ ctx_alloc       equ     16              ; ctx_size rounded up to keep sp even
 jx1_init:
         move.l  a0,ctx_src(a5)
         move.l  a1,ctx_dst(a5)
-        move.b  d0,ctx_chunk(a5)
+        move.w  d0,ctx_chunk(a5)
         moveq   #1,d1
         swap    d1                      ; lastOffset = INITIAL_OFFSET, remaining = 0
         move.l  d1,ctx_packed(a5)
         move.b  #$80,ctx_bits(a5)       ; empty bit buffer (sentinel only)
-        clr.b   ctx_state(a5)           ; State.START
+        move.b  #$80,ctx_state(a5)      ; State.START
         rts
 
 ; -----------------------------------------------------------------------------
@@ -82,18 +85,23 @@ jx1_decompress:
 ; Returns d0 = 0 when the stream is fully processed, 1 when there is more;
 ; a1 = current end of output. Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
-jx1_resume:
-        movem.l (a5)+,d3/a0-a1          ; packed offset/remaining, src, dst
-        moveq   #0,d5
-        move.b  (a5)+,d5                ; budget = chunkSize
-        move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
-        move.b  (a5),d4                 ; op state (Java: switch in next())
-        beq.s   begin_literals          ; START: the stream opens with literals
-        cmp.b   #3,d4
-        bne.s   resume_op               ; LITERALS or MATCH, mid-op
-        lea     -ctx_state(a5),a5       ; DONE: keep returning "fully processed"
+entry_special:                          ; the negative states, both rare
+        addq.b  #1,d4                   ; DONE ($FF) becomes zero
+        beq.s   entry_done
+        bra.s   begin_literals          ; START: the stream opens with literals
+entry_done:
+        lea     -ctx_state(a5),a5       ; keep returning "fully processed"
         moveq   #0,d0
         rts
+
+jx1_resume:
+        movem.l (a5)+,d3/a0-a1          ; packed offset/remaining, src, dst
+        move.w  (a5)+,d5                ; budget = chunkSize
+        move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
+        move.b  (a5),d4                 ; op state (Java: switch in next()) -
+        bmi.s   entry_special           ; START and DONE are the negative ones
+        bra.s   op_body                 ; mid-op: the budget is a whole chunk
+                                        ; again, so its guard can be skipped
 
 ; get_gamma: interlaced Elias gamma value in d1.w (assumption: fits a word).
 ; Holds the decompressor's only bit-queue refills: gammas are odd-length,
@@ -125,11 +133,15 @@ gamma_done:                             ; doubles as the loop jump
         rts
 
 begin_literals:                         ; Java: beginLiterals()
-        moveq   #1,d4                   ; State.LITERALS
+        moveq   #0,d4                   ; State.LITERALS
         bsr.s   get_gamma
         move.w  d1,d3                   ; remaining = gamma; lastOffset untouched
 
-resume_op:                              ; shared for literals and match; d4 = state
+resume_op:                              ; reached after parsing an op, when the
+        tst.w   d5                      ; chunk may already be spent; a call
+        beq.w   suspend                 ; resuming mid-op enters at op_body
+                                        ; instead and skips this
+op_body:                                ; shared for literals and match; d4 = state
         move.w  d3,d0                   ; take_budget: min(remaining, budget),
         cmp.w   d5,d0                   ; subtracted from both (its only site)
         bls.s   budget_fits
@@ -137,12 +149,8 @@ resume_op:                              ; shared for literals and match; d4 = st
 budget_fits:
         sub.w   d0,d3
         sub.w   d0,d5
-        tst.w   d0
-        beq.w   suspend                 ; budget exhausted before this op
-                                        ; (.w: out of short range; taken Bcc
-                                        ; costs 10 cycles at either width)
         movea.l a0,a2                   ; literals copy straight from the input
-        cmp.b   #1,d4
+        tst.b   d4
         beq.s   source_ready
         movea.l a1,a2                   ; match: destination minus lastOffset
         swap    d3                      ; (Java: readBufferByte(); the destination
@@ -167,13 +175,13 @@ ladder:
 ladder_end:
         dbf     d1,ladder               ; full 8-move passes for big copies
 copy_done:
-        cmp.b   #1,d4
+        tst.b   d4
         bne.s   copied                  ; matches consume no input here;
         movea.l a2,a0                   ; literals do
 copied:
         tst.w   d3
         bne.s   suspend                 ; budget spent mid-op
-        cmp.b   #1,d4                   ; state test BEFORE the bit read: cmp
+        tst.b   d4                      ; state test BEFORE the bit read: it
         beq.s   literals_transition     ; must not clobber the bit in carry
         add.b   d2,d2                   ; Java: next(), case MATCH (bare read)
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
@@ -220,16 +228,16 @@ literals_transition:
 suspend:                                ; Java: resume() returning true
         move.b  d4,(a5)                 ; the interrupted op's state, verbatim
         move.b  d2,-(a5)                ; bit buffer
-        subq.l  #1,a5                   ; skip ctx_chunk
+        subq.l  #2,a5                   ; skip the chunk word
         movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = context base
         moveq   #1,d0                   ; more output pending: call again
         rts
 
 end_marker:                             ; Java: State.DONE (no final flip needed:
-        moveq   #3,d0                   ; output is already in place)
-        move.b  d0,(a5)
+        moveq   #-1,d0                  ; output is already in place)
+        move.b  d0,(a5)                 ; State.DONE
         move.b  d2,-(a5)
-        subq.l  #1,a5
+        subq.l  #2,a5
         movem.l d3/a0-a1,-(a5)
         moveq   #0,d0                   ; fully processed
         rts
