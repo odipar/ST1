@@ -10,11 +10,11 @@ measure decode time with the system's 200 Hz tick:
   decompressor
 * [jx1_hatari_ring.S](jx1_hatari_ring.S) —
   [../jx1_68000_ring.S](../jx1_68000_ring.S), streaming each corpus through
-  256- and 1024-byte rings at chunk 16 and 127. Nothing is accumulated: each
-  call's output is compared against the expected image as it is drained, and
-  the wrap is detected the way the interface intends (`a1 == a4`). The point
-  of the feature is visible here — 32000 bytes decompressed through a
-  256-byte buffer.
+  five ring/chunk shapes. Nothing is accumulated: each call's output is
+  compared against the expected image as it is drained, and the wrap is
+  detected the way the interface intends (`a1 == a4`). The point of the
+  feature is visible here — 32000 bytes decompressed through a 256-byte
+  buffer.
 
 ```sh
 mvn compile                 # in the repo root: the compressor makes the streams
@@ -61,8 +61,39 @@ widened its byte moves — Unicorn does not fault odd `.w`/`.l` accesses, so thi
 class of bug is invisible to the emulator rig.
 
 Result: **all cases pass**, at every chunk size, at both destination parities.
-The ring program passes all 28 of its configurations too (7 corpora × 2 ring
-sizes × 2 chunk sizes), every byte checked against the expected image.
+
+## The ring's per-call contract, checked on hardware
+
+The ring program runs 35 configurations (7 corpora × 5 ring/chunk shapes) and
+checks every byte against the expected image — but it also verifies the
+documented per-call size contract, which is where the ring/chunk ratio
+matters:
+
+| shape | ring % chunk | expected |
+|---|---|---|
+| R256/16 | 0 | every call a full chunk |
+| R1024/16 | 0 | every call a full chunk |
+| R256/127 | 2 | short calls at the wrap |
+| R1000/16 | 8 | short calls at the wrap (and a ring that is not a power of two) |
+| R1024/127 | 8 | short calls at the wrap |
+
+Each call that returns 1 must produce exactly the chunk size — unless it ran
+into the end of the buffer, which the harness requires to coincide with the
+write pointer reaching `a4`, and which it rejects outright when the chunk
+divides the ring. The result is reported per shape: **`OKf`** when every call
+was a full chunk, **`OKv`** when short calls appeared at the wrap.
+
+```
+text      R256/16=OKf R256/127=OKv R1000/16=OKf R1024/16=OKf R1024/127=OKf
+wordsoup  R256/16=OKf R256/127=OKv R1000/16=OKv R1024/16=OKf R1024/127=OKv
+rle32k    R256/16=OKf R256/127=OKv R1000/16=OKv R1024/16=OKf R1024/127=OKv
+```
+
+Every dividing shape reports `OKf`, exactly as documented. The non-dividing
+shapes report `OKv` whenever the corpus is big enough to reach a wrap at all —
+`text` (360 bytes) never wraps a 1000- or 1024-byte ring, so it stays `OKf`
+there, and `allsame` (1000 bytes) exactly fills the 1000-byte ring without
+wrapping.
 
 ## Timing vs the cycle model
 
@@ -115,7 +146,9 @@ The model's *relative* predictions — the thing optimization decisions were
 actually made on — hold within **1.6–4.8%**: predicted chunk-16 / chunk-127
 ratios of 1.30–2.21 against 1.32–2.31 measured.
 
-Measurement resolution is ±1 tick, i.e. 0.4–1.3% per figure. Hatari settings:
+Measurement resolution is ±1 tick, i.e. 0.4–1.3% per figure; the calibration
+loop itself lands on 240 or 241 ticks depending on where the program's code
+falls relative to the interrupts. Hatari settings:
 `--machine st --cpuclock 8 --cpu-exact on --compatible on` (cycle-exact 68000
 with prefetch), plus `--disable-video 1` to run headless — that flag only
 suppresses the host window, the shifter still contends for the bus and every
