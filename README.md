@@ -78,43 +78,55 @@ memory**, use the ring-buffer variants below.
 ## Ring-buffer variant
 
 The Java `Decompressor` streams output through a caller-supplied ring buffer,
-so memory use is bounded by the buffer rather than by the output. This is that
-same feature on the 68000, and it carries it without a callback: the
-buffer-full event ("flip") is reported in `jx1_resume`'s return value.
+so memory use is bounded by the buffer rather than by the output.
+[jx1_68000_ring.S](68k/jx1_68000_ring.S) is that same feature on the 68000, in
+336 bytes — with **no callback, no extra return code, and no extra context**:
+`jx1_resume` still returns just 0 (done) and 1 (more), and the context is the
+same 15-byte block as the linear version.
 
-[jx1_68000_ring.S](68k/jx1_68000_ring.S) is 350 bytes with a 23-byte context,
-takes any buffer size N and any chunk size 1..127, and costs 10–22% over the
-linear decompressor — the price of bounded memory.
-
-`jx1_init` takes the ring in a1 and its size N in d1.l; `jx1_resume` (slot
-base+4 — there is no one-shot, since a bounded buffer has to be drained)
-returns:
-
-* **0** — done. The bytes written since your last drain are `[last drain, a1)`
-* **1** — more output, chunk budget spent
-* **2** — more output, **and the buffer wrapped**: everything up to the end of
-  the buffer is valid and must be consumed now, because the next call starts
-  writing at the buffer's first byte again (Java: `flip(buffer, length)`)
+`jx1_init` is unchanged except that a1 is the ring buffer. `jx1_resume` (slot
+base+4 — there is no one-shot, since a bounded buffer has to be drained) takes
+the ring bounds as read-only parameters in a3/a4, and leaves the write pointer
+in a1. The caller drains after every call and spots the wrap itself: the write
+pointer never wraps *during* a call, so a full buffer simply shows up as
+`a1 == a4`, and the next call restarts at a3.
 
 ```
         lea     stream,a0
         lea     ring,a1                 ; N bytes; no alignment requirement
         moveq   #16,d0                  ; chunk size X
-        move.l  #4096,d1                ; ring size N
-        lea     context,a5              ; 24 bytes, word-aligned
+        lea     context,a5              ; 16 bytes, word-aligned
         bsr     jx1_init
+        lea     ring,a3                 ; ring bounds: parameters, not state
+        lea     ring+4096,a4
+        movea.l a3,a6                   ; a6 = first undrained byte
 .chunk:
         bsr     jx1_resume
-        ; consume [drained, a1) — or [drained, ring+N) when d0 = 2
+        ; consume [a6 .. a1)
+        movea.l a1,a6
+        cmpa.l  a4,a1                   ; buffer full? next call restarts at a3
+        bne.s   .more
+        movea.l a3,a6
+.more:
         tst.w   d0
         bne.s   .chunk
 ```
 
 A buffer of N bytes supports back-references up to exactly N, so compress with
-`-mN`. Rather than testing for a wrap per byte, each copy pass takes
-`n = min(remaining, budget, end−dst, end−src)` and runs the same rolled-out
-ladder as the linear version, wrapping the pointers between segments: a ring
-costs a clamp per segment, not a test per byte.
+`-mN`. The entry clamps the call's budget to the room left in the buffer, so
+the destination can never reach the buffer end *inside* a call — only exactly
+as the budget runs out — which is why no copy needs a destination bounds test
+and the buffer is wrapped once, at the next entry. A match source that runs
+into the buffer end still splits the copy into segments, so the rolled-out
+ladder itself never needs a bounds test. Note that a call near the end of the
+buffer produces fewer than X bytes: use the write pointer, not an assumed
+chunk size.
+
+The header records three measured alternatives that were rejected: reporting
+the flip with a `2` (forces a stop at the buffer end — 3.2–6.1% slower, 14
+bytes larger, 8 bytes more context), specialising for power-of-two sizes, and
+allowing a bounded overrun into an N+X buffer (which breaks the source rule:
+an offset-1 run crossing the end stalls).
 
 ## Retired exploration
 
