@@ -1,3 +1,10 @@
+# Tests
+
+Two layers. [emu/](emu/) is the differential suite under emulation — every
+correctness claim about the decompressors comes from there, and it needs only
+Python, Unicorn and rmac. This directory is the hardware layer, covering what
+emulation cannot: real 68000 timing, and address errors that actually fault.
+
 # Real-hardware validation
 
 Two TOS programs exercise the decompressors on a real 68000 — under
