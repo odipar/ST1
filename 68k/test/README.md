@@ -9,12 +9,11 @@ measure decode time with the system's 200 Hz tick:
 * [jx1_hatari.S](jx1_hatari.S) — [../jx1_68000.S](../jx1_68000.S), the linear
   decompressor
 * [jx1_hatari_ring.S](jx1_hatari_ring.S) — the ring decompressors, streaming
-  each corpus through several ring/chunk shapes. It builds three times:
+  each corpus through several ring/chunk shapes. It builds twice:
   `-dRINGMOD=0` for [../jx1_68000_ring.S](../jx1_68000_ring.S) with dividing
-  and non-dividing shapes, `-dRINGMOD=1` for
-  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) and `-dRINGMOD=2` for
-  [../jx1_68000_ring_mod_opt.S](../jx1_68000_ring_mod_opt.S), both with the
-  dividing shapes their contract requires. Nothing is accumulated: each call's output is
+  and non-dividing shapes, and `-dRINGMOD=1` for
+  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) with the dividing shapes
+  its contract requires. Nothing is accumulated: each call's output is
   compared against the expected image as it is drained, and the wrap is
   detected the way the interface intends (`a1 == a4`). The point of the
   feature is visible here — 32000 bytes decompressed through a 256-byte
@@ -164,25 +163,23 @@ ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
 190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
 +3.4% the model predicted — agreement within the ±1 tick resolution.
 
-`jx1_68000_ring_mod_opt.S`, the cycle-tuned build of the same contract, on the
-same shape. The three ring columns are worth reading together, remembering
-that `ring` and `ring_mod_opt` carry the entry optimisations and `ring_mod`
-does not — which is why the plain ring now beats it:
+`jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
+spends that on a cheaper entry, on the same shape:
 
-| corpus | ring | ring_mod | ring_mod_opt | mod_opt vs mod |
-|---|---|---|---|---|
-| text | 182 | 190 | 176 | +7.4% |
-| wordsoup | 218 | 224 | 215 | +4.0% |
-| farmatch | 182 | 192 | 175 | +8.9% |
-| period129 | 223 | 235 | 215 | +8.5% |
-| allsame | 213 | 225 | 206 | +8.4% |
-| rle32k | 199 | 210 | 192 | +8.6% |
-| maxoffset | 197 | 212 | 189 | +10.8% |
+| corpus | ring | ring_mod | ring_mod gain |
+|---|---|---|---|
+| text | 182 | 176 | +3.3% |
+| wordsoup | 218 | 215 | +1.4% |
+| farmatch | 182 | 175 | +3.8% |
+| period129 | 223 | 215 | +3.6% |
+| allsame | 213 | 206 | +3.3% |
+| rle32k | 199 | 192 | +3.5% |
+| maxoffset | 197 | 189 | +4.1% |
 
-(ticks, ring 1024, chunk 16, same corpora and calibration; `ring_mod` and
-`ring_mod_opt` are unchanged since they were measured, `ring` is the
-optimised one). The +4.0–10.8% in the last column sits against the +4.8–11.0%
-the cycle model predicted for those two files.
+(ticks, ring 1024, chunk 16, same corpora and calibration.) Both files carry
+the same entry optimisations, so what the last column shows is the
+divisibility requirement alone, against the +1.5–3.4% the cycle model
+predicted for it.
 
 **The model holds.** Real ST decode time runs **+4.5% to +10.2%** above the
 idealized 68000 cycle counts (mean +7.7%) — the gap is interrupt service and
