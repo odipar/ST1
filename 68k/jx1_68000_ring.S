@@ -9,36 +9,80 @@
 ; ZX1/jx1 (see LICENSE).
 ;
 ; jx1_68000.S writes to a linear destination and reads matches out of it, so
-; the output IS the window and memory use grows with the output. This variant
-; is the port of the Java Decompressor's ring buffer: output streams through
-; a caller-supplied buffer of N bytes and memory use is bounded by N, not by
+; the output IS the window and memory use grows with the output. This is the
+; port of the Java Decompressor's ring buffer: output streams through a
+; caller-supplied buffer of N bytes and memory use is bounded by N, not by
 ; the output. A buffer of N bytes supports back-references up to exactly N
 ; (compress with -mN).
 ;
-; Instead of the Java flip() callback, jx1_resume reports a full buffer in
-; its return value: 0 = done, 1 = more output, 2 = more output AND the buffer
-; just wrapped. On a 2 the caller must consume the buffer before calling
-; again - the decompressor is about to overwrite it from the start.
+; There is no flip callback and no third return code: jx1_resume returns 0
+; (done) and 1 (more), exactly like jx1_68000.S. The caller has to drain
+; after every call anyway, so NOT reporting the buffer-full event is what
+; makes the ring bookkeeping collapse:
 ;
-; The copy engine is unchanged: rather than testing for a wrap per byte, each
-; pass copies a segment that provably cannot wrap,
+; 1. THE BUDGET CARRIES THE RING. The entry clamps this call's budget to the
+;    room left in the buffer, so the destination CANNOT reach the end of the
+;    buffer inside a call - only exactly as the budget runs out. Every
+;    per-segment destination clamp, the post-copy wrap test, and the special
+;    case for a flip landing on an op's last byte all vanish. The buffer is
+;    wrapped once, at the next entry, where the room is computed anyway.
 ;
-;       n = min(remaining, budget, end - dst, end - src)
+; 2. THE RING BOUNDS ARE NOT STATE. The caller holds them - it needs them to
+;    drain - so it passes them in a3/a4 (read-only) rather than the
+;    decompressor storing them. The context is back to the 15 bytes of
+;    jx1_68000.S: a ring costs no context at all.
 ;
-; and the pointers are wrapped between segments, so the rolled-out ladder
-; runs exactly as it does in jx1_68000.S. A ring costs a clamp per segment,
-; not a test per byte. Matches are not slowed down by the wrap either: the
-; source is recomputed from the destination for each segment (source =
-; dst - offset, + N when that falls below the buffer), never carried.
+; What is left of the ring is one clamp per call and one clamp per match
+; segment. A copy segment still stops where the match source reaches the end
+; of the buffer, so the rolled-out ladder needs no bounds test, and the
+; source is recomputed from the destination per segment (source =
+; dst - offset, + N when that falls below the buffer).
 ;
-; Measured, and deliberately NOT specialised: restricting the buffer and the
-; chunk to powers of two lets the destination clamp be dropped entirely (X
-; then divides N, so the buffer end can only fall on a chunk boundary, never
-; inside a copy). That was built and measured at +4.1-4.5% - not worth a
-; second file and a divisibility rule the caller must honour. Wrapping the
-; source by masking instead of comparing, which powers of two also allow,
-; measured SLOWER on a 68000: and.l (8) plus lea 0(An,Dn.l) (12) costs more
-; than the compare and rarely-taken branch it replaces (a not-taken Bcc is 8).
+; The caller drains after every call, and detects the wrap itself - the write
+; pointer never wraps during a call, so it only has to notice that the
+; buffer is now full:
+;
+;       prev = ring
+;   .loop:
+;       bsr     jx1_resume              ; a1 = write pointer
+;       ; consume [prev .. a1)
+;       movea.l a1,prev
+;       cmpa.l  a4,a1                   ; buffer full? the next call restarts
+;       bne.s   .more                   ; at the beginning of the buffer
+;       movea.l a3,prev
+;   .more:
+;       tst.w   d0
+;       bne.s   .loop
+;
+; Because the budget is clamped to the room, a call near the end of the
+; buffer produces FEWER than chunkSize bytes; a caller must use the write
+; pointer, not an assumed chunk size.
+;
+; Measured, and deliberately NOT done:
+;
+; - Reporting the flip with a third return code (2 = buffer wrapped) forces
+;   the decompressor to STOP at the buffer end, which brings back a
+;   destination clamp on every copy segment, a wrap test after every copy,
+;   a special case for a flip landing on an op's last byte, and 8 bytes of
+;   context for the ring bounds. That version measured 3.2-6.1% slower and
+;   14 bytes larger.
+;
+; - Specialising for power-of-two buffer and chunk sizes (X then divides N,
+;   so the destination clamp can be dropped) measured +4.1-4.5% over that
+;   version - not worth a divisibility rule the caller must honour, and the
+;   clamp-the-budget trick above beats it anyway. Wrapping the source by
+;   masking instead of comparing measured SLOWER on a 68000: and.l (8) plus
+;   lea 0(An,Dn.l) (12) costs more than the compare and rarely-taken branch
+;   it replaces (a not-taken Bcc is 8).
+;
+; - Allowing the destination to overrun into a buffer of N + chunkSize bytes
+;   removes the entry clamp (~12 cycles a call) but breaks the SOURCE rule:
+;   bytes in the overrun are logically positions N, N+1..., so a source
+;   reading past the end is correct inside the overrun window and wrong
+;   outside it, and the clamp has to know which. Concretely, an offset-1 run
+;   crossing the end reaches source == end with room 0 and stalls. Making
+;   the slack a true mirror of the first chunkSize bytes fixes reads but
+;   costs more code to keep in sync than it saves.
 ;
 ; Assumptions, undefined when violated:
 ;
@@ -46,24 +90,24 @@
 ;   2. the chunk size is 1..127
 ;   3. no back-reference offset exceeds the ring buffer size N
 ;
-; The context must be word-aligned and is 23 bytes (24 with padding).
+; The context must be word-aligned and is 15 bytes (16 with padding) - the
+; same block, with the same layout, as jx1_68000.S.
 ;
-; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a5 and leave
-; a5 = context untouched. (d4 carries the op state.)
+; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
+; a5 = context and the ring bounds a3/a4 untouched. (d4 carries the op
+; state.) d6/d7 and a6 are never touched.
 ; -----------------------------------------------------------------------------
 
-; Context block (Java: Decompressor's fields). The first five longwords are
-; laid out in movem order d3,a0,a1,a3,a4.
+; Context block (Java: Decompressor's fields). The first three longwords are
+; laid out in movem order d3,a0,a1.
 ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
 ctx_src         equ     4               ; .l  a0: input position
 ctx_dst         equ     8               ; .l  a1: write position (Java: bufferIndex)
-ctx_start       equ     12              ; .l  a3: ring buffer start
-ctx_end         equ     16              ; .l  a4: ring buffer end (start + N)
-ctx_chunk       equ     20              ; .b  chunkSize (X), 1..127
-ctx_bits        equ     21              ; .b  bit buffer
-ctx_state       equ     22              ; .b  State: 0 START, 1 LITERALS, 2 MATCH, 3 DONE
-ctx_size        equ     23
-ctx_alloc       equ     24              ; ctx_size rounded up to keep sp even
+ctx_chunk       equ     12              ; .b  chunkSize (X), 1..127
+ctx_bits        equ     13              ; .b  bit buffer
+ctx_state       equ     14              ; .b  State: 0 START, 1 LITERALS, 2 MATCH, 3 DONE
+ctx_size        equ     15
+ctx_alloc       equ     16              ; ctx_size rounded up to keep sp even
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
 ; There is no one-shot entry: a bounded buffer has to be drained by the
@@ -73,15 +117,12 @@ ctx_alloc       equ     24              ; ctx_size rounded up to keep sp even
 
 ; -----------------------------------------------------------------------------
 ; jx1_init: a0 = compressed data, a1 = ring buffer, d0.b = chunk size 1..127,
-;           d1.l = ring buffer size N, a5 = word-aligned context of ctx_size.
+;           a5 = word-aligned context block of ctx_size bytes.
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------
 jx1_init:
         move.l  a0,ctx_src(a5)
         move.l  a1,ctx_dst(a5)
-        move.l  a1,ctx_start(a5)
-        add.l   a1,d1                   ; end = start + N
-        move.l  d1,ctx_end(a5)
         move.b  d0,ctx_chunk(a5)
         moveq   #1,d1
         swap    d1                      ; lastOffset = INITIAL_OFFSET, remaining = 0
@@ -91,22 +132,31 @@ jx1_init:
         rts
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a5 = context. Emits at most ctx_chunk output bytes, and stops
-; early when the ring buffer fills. Returns
-;   d0 = 0  the stream is fully processed; the bytes written since the
-;           caller's last drain are [last drain .. a1)
-;   d0 = 1  more output pending, chunk budget spent
-;   d0 = 2  more output pending, AND the buffer wrapped: everything up to the
-;           end of the buffer is valid and must be consumed now, because the
-;           next call starts writing at the buffer's first byte again
-;           (Java: flip(buffer, length))
+; jx1_resume: a5 = context, a3 = ring buffer start, a4 = ring buffer end
+;             (start + N); both read-only and unchanged on return.
+; Emits at most ctx_chunk output bytes, and at most as many as fit before the
+; end of the ring buffer. Returns d0 = 0 when the stream is fully processed,
+; 1 when there is more; a1 = the write pointer, which is the caller's cue:
+; everything between its previous value and a1 is new output, and when a1
+; reaches a4 the buffer is full and the next call restarts at a3.
 ; Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 jx1_resume:
-        movem.l (a5)+,d3/a0-a1/a3-a4    ; packed offset/remaining, src, dst,
-        moveq   #0,d5                   ; ring start, ring end
+        movem.l (a5)+,d3/a0-a1          ; packed offset/remaining, src, dst
+        moveq   #0,d5
         move.b  (a5)+,d5                ; budget = chunkSize
         move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
+        move.l  a4,d1
+        sub.l   a1,d1                   ; room before the end of the buffer
+        bne.s   have_room
+        movea.l a3,a1                   ; the buffer was filled by the previous
+        move.l  a4,d1                   ; call and the caller has drained it:
+        sub.l   a3,d1                   ; wrap, and the room is the whole ring
+have_room:
+        cmp.l   d5,d1                   ; budget = min(chunkSize, room), so the
+        bcc.s   budget_set              ; destination cannot reach the end of
+        move.w  d1,d5                   ; the buffer inside this call - only
+budget_set:                             ; exactly as the budget runs out
         move.b  (a5),d4                 ; op state (Java: switch in next())
         beq.s   begin_literals          ; START: the stream opens with literals
         cmp.b   #3,d4
@@ -151,13 +201,12 @@ begin_literals:                         ; Java: beginLiterals()
 
 ; -----------------------------------------------------------------------------
 ; resume_op: the segment loop, shared by literals and matches (d4 = state).
-; Each pass copies as many bytes as provably fit without wrapping either
-; pointer, so the ladder below needs no bounds test at all.
+; Only a match source running into the end of the buffer can split a copy;
+; the destination never can, so literals always copy in one pass.
 ; -----------------------------------------------------------------------------
 resume_op:
         tst.w   d3
-        beq.s   transition              ; op already complete: only reachable
-                                        ; when a flip landed on its last byte
+        beq.s   transition              ; op complete: parse the next one
         tst.w   d5
         beq.w   suspend_more            ; budget spent: hand control back
         move.w  d3,d0                   ; n = min(remaining, budget)
@@ -165,28 +214,22 @@ resume_op:
         bls.s   budget_fits
         move.w  d5,d0
 budget_fits:
-        move.l  a4,d1
-        sub.l   a1,d1                   ; room before the ring end (>= 1)
-        cmp.l   d0,d1
-        bcc.s   dst_fits
-        move.w  d1,d0                   ; this segment stops at the wrap
-dst_fits:
         cmp.b   #1,d4
         beq.s   literal_source
         movea.l a1,a2                   ; match: source = dst - lastOffset,
         swap    d3                      ; brought back into the buffer if it
         suba.w  d3,a2                   ; falls below the start (Java:
-        swap    d3                      ; readBufferByte()'s index wrap).
-        cmpa.l  a3,a2                   ; Recomputed per segment, so a wrapped
-        bcc.s   source_ready            ; source needs no extra bookkeeping;
-        suba.l  a3,a2                   ; a2 == end is unreachable, since that
-        adda.l  a4,a2                   ; needs dst - offset == start, which
-source_ready:                           ; takes the branch above instead.
+        swap    d3                      ; readBufferByte()'s index wrap)
+        cmpa.l  a3,a2
+        bcc.s   source_ready
+        suba.l  a3,a2
+        adda.l  a4,a2
+source_ready:
         move.l  a4,d1
         sub.l   a2,d1                   ; room before the source wraps (>= 1)
         cmp.l   d0,d1
         bcc.s   copy
-        move.w  d1,d0
+        move.w  d1,d0                   ; this segment stops at the wrap
         bra.s   copy
 literal_source:
         movea.l a0,a2                   ; literals copy straight from the input
@@ -211,22 +254,15 @@ ladder:
 ladder_end:
         dbf     d1,ladder               ; full 8-move passes for big copies
         cmp.b   #1,d4
-        bne.s   wrap_test               ; matches consume no input here;
+        bne.s   resume_op               ; matches consume no input here;
         movea.l a2,a0                   ; literals do
-wrap_test:
-        cmpa.l  a4,a1
-        bne.s   resume_op               ; still inside the buffer: next segment
-        movea.l a3,a1                   ; the buffer is full: wrap and tell the
-        moveq   #2,d0                   ; caller to consume it before we
-        bra.s   suspend                 ; overwrite it (Java: flip())
+        bra.s   resume_op
 
 transition:                             ; remaining == 0: parse the next block
         cmp.b   #1,d4                   ; header. State test BEFORE the bit
         beq.s   literals_transition     ; read: cmp must not clobber the carry
         add.b   d2,d2                   ; Java: next(), case MATCH (bare read)
         bcc.w   begin_literals          ; 0: literals; 1: falls into new offset
-                                        ; (.w: the segment loop pushed it out of
-                                        ; short range; taken Bcc costs 10 either way)
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
         moveq   #2,d4                   ; State.MATCH
@@ -268,19 +304,18 @@ literals_transition:
         bra.w   resume_op               ; (.w: same, zero cycle cost)
 
 suspend_more:                           ; Java: resume() returning true
-        moveq   #1,d0                   ; more output pending: call again
-suspend:                                ; d0 = the caller's return code
         move.b  d4,(a5)                 ; the interrupted op's state, verbatim
         move.b  d2,-(a5)                ; bit buffer
-        lea     -9(a5),a5               ; skip the chunk byte and the two ring
-        movem.l d3/a0-a1,-(a5)          ; bounds (never change), then store in
-        rts                             ; layout order, a5 = context base
+        subq.l  #1,a5                   ; skip ctx_chunk
+        movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = context base
+        moveq   #1,d0                   ; more output pending: call again
+        rts
 
 end_marker:                             ; Java: State.DONE - the caller drains
         moveq   #3,d0                   ; whatever is left below a1
         move.b  d0,(a5)
         move.b  d2,-(a5)
-        lea     -9(a5),a5
+        subq.l  #1,a5
         movem.l d3/a0-a1,-(a5)
         moveq   #0,d0                   ; fully processed
         rts
