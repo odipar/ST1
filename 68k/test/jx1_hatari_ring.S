@@ -139,6 +139,12 @@ verify_ring:
         move.l  CASE_EXP(a6),expptr
         move.l  CASE_ELEN(a6),expleft
 .loop:
+        move.l  #$BEEF0000,d0                   ; the ABI calls d0-d5 clobbered,
+        move.l  d0,d1                           ; so a caller may pass anything
+        move.l  d0,d2                           ; in them; prove the decoder
+        move.l  d0,d3                           ; never reads their upper words
+        move.l  d0,d4
+        move.l  d0,d5
         bsr     jx1_resume                      ; a1 = write pointer, d0 = 0/1
         move.w  d0,retcode
         move.l  a1,curdst
@@ -322,7 +328,7 @@ nshort:     ds.w    1
 shapeidx:   ds.w    1
 sizebad:    ds.b    1
         even
-ctx:        ds.b    16                          ; jx1 context (15 bytes + pad)
+ctx:        ds.b    16                          ; jx1 context
         even
 ring_buf:   ds.b    RING_BIG                    ; the whole point: far smaller
         even                                    ; than the data streamed through

@@ -13,7 +13,7 @@ HATARI=${HATARI:-hatari}
 TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 
 # +o3 folds 0(An) to (An); without it rmac emits a 2-byte-larger decompressor
-# (326 instead of 324). With it, rmac and vasm agree byte for byte.
+# (322 instead of 320). With it, rmac and vasm agree byte for byte.
 python3 gendata.py
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S                  # linear
 rmac -m68000 -p +o3 -dRINGMOD=0 -i. -i.. -o JX1RING.PRG jx1_hatari_ring.S  # ring
@@ -22,11 +22,23 @@ rmac -m68000 -p +o3 -dRINGMOD=1 -i. -i.. -o JX1RMOD.PRG jx1_hatari_ring.S  # rin
 # --disable-video runs Hatari headless (no window); it does not change what is
 # emulated - the shifter still contends for the bus, and the measured ticks are
 # identical to a windowed run.
+# A TOS program cannot fail the shell, so the output is the verdict: every
+# program must reach DONE, and no case may report BAD.
+fail=0
 run() {
-    "$HATARI" --tos "$TOS" --machine st --cpuclock 8 --cpu-exact on \
+    out=$("$HATARI" --tos "$TOS" --machine st --cpuclock 8 --cpu-exact on \
         --compatible on --memsize 4 --sound off --conout 2 --fast-forward on \
-        --disable-video 1 --run-vbls 3000 --log-level fatal "$1"
+        --disable-video 1 --run-vbls 3000 --log-level fatal "$1" 2>/dev/null)
+    printf '%s\n' "$out"
+    case "$out" in
+        *BAD*)  echo "FAILED: $1 reported BAD"     >&2; fail=1 ;;
+    esac
+    case "$out" in
+        *DONE*) ;;
+        *)      echo "FAILED: $1 never reached DONE" >&2; fail=1 ;;
+    esac
 }
 run JX1TEST.PRG
 run JX1RING.PRG
 run JX1RMOD.PRG
+exit $fail

@@ -72,7 +72,9 @@
 ;
 ;   1. no single literal run or match is longer than 32768 bytes
 ;   2. the chunk size is 1..127
-;   3. no back-reference offset exceeds the ring buffer size N
+;   3. the ring buffer size N is 1..65535. The format's offsets stop at
+;      32512, so a larger ring could never be referenced anyway
+;   4. no back-reference offset exceeds the ring buffer size N
 ;
 ; The context must be word-aligned and is 16 bytes.
 ;
@@ -146,10 +148,13 @@ jx1_resume:
         move.l  a4,d1                   ; call and the caller has drained it:
         sub.l   a3,d1                   ; wrap, and the room is the whole ring
 have_room:
-        cmp.l   d5,d1                   ; budget = min(chunkSize, room), so the
+        cmp.w   d5,d1                   ; budget = min(chunkSize, room), so the
         bcc.s   budget_set              ; destination cannot reach the end of
         move.w  d1,d5                   ; the buffer inside this call - only
-budget_set:                             ; exactly as the budget runs out
+budget_set:                             ; exactly as the budget runs out. Word:
+                                        ; the room is at most N <= 65535, so
+                                        ; this cannot read the caller's junk in
+                                        ; the upper words of d1 or d5
         move.b  (a5),d4                 ; op state (Java: switch in next()) -
         bmi.s   entry_special           ; START and DONE are the negative ones;
                                         ; a mid-op resume falls straight into
@@ -182,7 +187,7 @@ budget_fits:
 source_ready:
         move.l  a4,d1
         sub.l   a2,d1                   ; room before the source wraps (>= 1)
-        cmp.l   d0,d1
+        cmp.w   d0,d1                   ; word, as above: the room is at most N
         bcc.s   copy
         move.w  d1,d0                   ; this segment stops at the wrap
         bra.s   copy
