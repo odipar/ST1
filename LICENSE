@@ -7,14 +7,14 @@ licensing structure of the original ZX1 (see c/zx1/LICENSE and the License
 section of c/zx1/README.md):
 
 1. THE COMPRESSOR - the Java compressor and optimal parser (Block, Optimizer,
-   Compressor, Zx1, and the retired compressor experiments), derived from
+   Compressor, Jx1, and the retired compressor experiments), derived from
    Einar Saukas' optimal C compressor - is available under the BSD 3-Clause
    License below. In practice this is relevant only if you modify its source
    code and/or incorporate the compressor within your own products; if you
    just execute it to compress files, you can simply ignore these conditions.
 
-2. THE DECOMPRESSORS - the Java Decompressor/Dzx1, the 68000 decompressor
-   68k/jx1_68000_opt7.S, and the retired decompressor variants - can be used
+2. THE DECOMPRESSORS - the Java Decompressor/Djx1, the 68000 decompressor
+   68k/jx1_68000.S, and the retired decompressor variants - can be used
    freely within your own programs (for any platform), even for commercial
    releases. The only condition is that you must indicate somehow in your
    documentation that you have used ZX1/jx1.

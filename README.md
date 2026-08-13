@@ -6,8 +6,8 @@ testing against the C binaries, including custom offset limits).
 
 Additions/differences to the original:
 
-* **custom buffer/backreference sizes** — `zx1 -mN` limits match offsets to N bytes;
-  `dzx1 -mN` decompresses through an N-byte ring buffer. A buffer of size N supports
+* **custom buffer/backreference sizes** — `jx1 -mN` limits match offsets to N bytes;
+  `djx1 -mN` decompresses through an N-byte ring buffer. A buffer of size N supports
   offsets up to exactly N, so small targets can trade compression ratio for memory
   (e.g. `-m511` compresses for decompression in a 511-byte buffer)
 * **incremental buffer** — `Decompressor` streams output through an externally supplied
@@ -27,9 +27,10 @@ Additions/differences to the original:
 
 ## The 68k decompressor
 
-**Decision (2026-08-13): [68k/jx1_68000_opt7.S](68k/jx1_68000_opt7.S) is the
-project's 68000 decompressor.** It came out of an 18-variant optimization
-campaign as the sweet spot between speed, size, and readability:
+**Decision (2026-08-13): [68k/jx1_68000.S](68k/jx1_68000.S) is the
+project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
+chosen). It came out of an 18-variant optimization campaign as the sweet
+spot between speed, size, and readability:
 
 * 324 bytes of position-independent code, 15-byte word-aligned context
 * one body — no macros, no tables, no self-modifying code; runs from ROM,
@@ -69,14 +70,14 @@ retired docs.
 | `Block`, `Optimizer` | `zx1.h`, `memory.c` (obsoleted by GC), `optimize.c` |
 | `Compressor` | `compress.c` |
 | `Decompressor` | `dzx1.c`, restructured as a resumable state machine around the ring-buffer `flip` hook |
-| `Zx1`, `Dzx1` | the `zx1`/`dzx1` command-line tools, same flags plus `-mN` |
+| `Jx1`, `Djx1` | the `zx1`/`dzx1` command-line tools renamed `jx1`/`djx1`, same flags plus `-mN` |
 
 ## Usage
 
 ```
 mvn package
-java -ea -cp target/classes org.jx1.Zx1  [-f] [-b] [-q] [-mN] input [output.zx1]
-java -ea -cp target/classes org.jx1.Dzx1 [-f] [-mN] input.zx1 [output]
+java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] input [output.zx1]
+java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
 ```
 
 See [c/zx1/src](c/zx1/src) for the original source code

@@ -67,7 +67,7 @@ final class RingBufferTest {
     @Test
     void rejectsBackreferenceBeyondBufferSize() {
         // farMatch contains an offset of ~2700, far beyond a 512-byte ring.
-        byte[] compressed = compress(TestData.farMatch(), Zx1.MAX_OFFSET_ZX1);
+        byte[] compressed = compress(TestData.farMatch(), Jx1.MAX_OFFSET_ZX1);
         AssertionError e = assertThrows(AssertionError.class,
                 () -> Decompressor.decompress(compressed, new byte[512]));
         assertTrue(String.valueOf(e.getMessage()).startsWith("Backreference beyond ring buffer"));
