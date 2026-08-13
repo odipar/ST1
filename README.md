@@ -59,10 +59,12 @@ match-source `lea`, woven per-body gammas, a folded budget gate, and a 256-word
 offset table — measured **+9.6–20.6% over opt7 at chunk 16** (up to +22.3% at
 chunk 127), all corpora positive, at 918 bytes.
 [68k/jx1_68000_opt_x16.S](68k/jx1_68000_opt_x16.S) tunes the combo further for
-chunk 16 (32-step ladders, context shaves) and adds `jx1_resume_n`, a batched
+chunk 16 (32-step ladders, context shaves), adds `jx1_resume_n`, a batched
 resume that keeps all state in registers between chunks and runs the caller's
-per-chunk work as a callback: **+27–30.6% over opt7 at chunk 16** with batches
-of 4–8 chunks. The SMC variants require RAM code, a single active context, and
+per-chunk work as a callback, and a full-chunk continuation fast path (at a
+chunk boundary the budget is the chunk by construction, so a spanning op
+skips the clamp and jumps at the copy ladder through init-patched constants):
+**+28.8–37.8% over opt7 at chunk 16** with batches of 4–8 chunks. The SMC variants require RAM code, a single active context, and
 a plain 68000.
 
 `OptimizerDcaw` (decode-cost-aware) scores the optimal-parse DP with
