@@ -56,9 +56,10 @@ variant — are preserved in [retired/](retired/):
   results, and the final same-model audit of every claim
 * [retired/68k/](retired/68k/) — all seventeen retired `.S` files
 
-The Java classes supporting retired experiments (`OptimizerDcaw`, the
-decode-cost-aware parser; `CompressorChunked`/`DecompressorChunked`, the
-chunk-aligned format) remain in the source tree; their stories are in the
+The Java classes behind retired experiments are retired too:
+[retired/java/](retired/java/) holds `OptimizerDcaw` (the decode-cost-aware
+parser), `CompressorChunked`/`DecompressorChunked` (the chunk-aligned
+format), and their tests, out of the Maven build; their stories are in the
 retired docs.
 
 ## Layout
