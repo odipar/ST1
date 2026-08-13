@@ -144,6 +144,25 @@ several times the buffer it streams through — lands in the same band,
 | rle32k | 7 | 32000 | 1024 | 16 | 1340624 | 1453333 | +8.4% |
 | maxoffset | 33121 | 33012 | 1024 | 16 | 1343450 | 1466667 | +9.2% |
 
+`jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
+spends that on a cheaper entry, measured on the same shape:
+
+| corpus | stream | output | ring | X | model | ST measured | ST vs model |
+|---|---|---|---|---|---|---|---|
+| text | 28 | 360 | 1024 | 16 | 17388 | 19000 | +9.3% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 277538 | 298667 | +7.6% |
+| farmatch | 410 | 2900 | 1024 | 16 | 118062 | 128000 | +8.4% |
+| period129 | 138 | 1032 | 1024 | 16 | 43298 | 47000 | +8.6% |
+| allsame | 6 | 1000 | 1024 | 16 | 41356 | 45000 | +8.8% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1296252 | 1400000 | +8.0% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1297658 | 1413333 | +8.9% |
+
+Same band (+7.6% to +9.3%, mean +8.5%), and the two tables also **confirm the
+optimisation on hardware independently of the model**: at identical corpora,
+ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
+190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
++3.4% the model predicted — agreement within the ±1 tick resolution.
+
 **The model holds.** Real ST decode time runs **+4.3% to +10.0%** above the
 idealized 68000 cycle counts (mean +7.4%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
