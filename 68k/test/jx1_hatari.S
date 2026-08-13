@@ -220,93 +220,14 @@ time_case:
         bsr     putdec
         bra     crlf
 
-; -----------------------------------------------------------------------------
-; calib: d7.w outer passes of an inner dbf loop, exactly 655386 cycles each:
-;   move.w #-1,d0 (8) + 65535 taken dbf (10) + 1 expiring dbf (14)
-;   + subq.w (4) + bne.s taken (10)
-; The last pass ends with a not-taken bne (8), so the total is
-;   d7 * 655386 - 2 cycles.
-; -----------------------------------------------------------------------------
-calib:
-.outer:
-        move.w  #-1,d0
-.inner:
-        dbf     d0,.inner
-        subq.w  #1,d7
-        bne.s   .outer
-        rts
-
-; sync: wait for a fresh tick, remember it. elapsed: ticks since then.
-sync:
-        move.l  hz200,d0
-.wait:
-        move.l  hz200,d1
-        cmp.l   d0,d1
-        beq.s   .wait
-        move.l  d1,t_start
-        rts
-elapsed:
-        move.l  hz200,d0
-        sub.l   t_start,d0
-        rts
-
-; ------------------------------------------------------------------- printing
-puts:
-        move.l  a0,-(sp)
-        move.w  #Cconws,-(sp)
-        trap    #GEMDOS
-        addq.l  #6,sp
-        rts
-
-crlf:
-        lea     m_crlf,a0
-        bra     puts
-
-; putdec: unsigned long in d0, printed without leading zeros.
-putdec:
-        movem.l d1-d4/a0,-(sp)
-        lea     numbuf+11,a0
-        clr.b   -(a0)                           ; NUL terminator
-.digit:
-        bsr     div10
-        add.b   #'0',d1
-        move.b  d1,-(a0)
-        tst.l   d0
-        bne.s   .digit
-        bsr     puts
-        movem.l (sp)+,d1-d4/a0
-        rts
-
-; div10: d0 = value; returns d0 = value/10, d1.w = value%10. Two divu.w
-; passes, so the 32-bit quotient never overflows a single divide.
-div10:
-        move.l  d0,d3
-        clr.l   d0
-        swap    d3
-        move.w  d3,d0                           ; high word
-        divu.w  #10,d0                          ; d0 = rem:quot
-        move.w  d0,d2                           ; high quotient
-        swap    d3                              ; low word back
-        move.w  d3,d0                           ; d0 = highrem:low
-        divu.w  #10,d0
-        move.w  d0,d4                           ; low quotient
-        clr.w   d0
-        swap    d0                              ; d0.w = remainder
-        move.w  d0,d1
-        and.l   #$FFFF,d1
-        move.w  d2,d0
-        swap    d0
-        move.w  d4,d0                           ; quotient = high:low
-        rts
-
 ; ------------------------------------------------------------ the decompressor
         include "jx1_68000.S"
+        include "hatari_util.inc"
 
         .data
 m_banner:   dc.b    "JX1 ST TEST",13,10,0
 m_calib:    dc.b    "CALIB ",0
 m_done:     dc.b    "DONE",13,10,0
-m_crlf:     dc.b    13,10,0
 m_sp:       dc.b    " ",0
 m_ok:       dc.b    "OK ",0
 m_bad:      dc.b    "BAD ",0
@@ -322,9 +243,7 @@ m_t:        dc.b    "T ",0
         .bss
         even
 save_ssp:   ds.l    1
-t_start:    ds.l    1
 iters:      ds.l    1
-numbuf:     ds.b    12
         even
 ctx:        ds.b    16                          ; jx1 context (15 bytes + pad)
         even

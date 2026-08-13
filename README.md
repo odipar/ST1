@@ -122,6 +122,12 @@ ladder itself never needs a bounds test. Note that a call near the end of the
 buffer produces fewer than X bytes: use the write pointer, not an assumed
 chunk size.
 
+Validated on real 68000 hardware timing alongside the linear version (see
+[68k/test/](68k/test/)): every corpus byte-checked as it is drained through
+256- and 1024-byte rings at chunk 16 and 127 — 32000 bytes decompressed
+through a 256-byte buffer — with measured decode time +8.0–9.2% over the
+cycle model, the same band as the linear decompressor.
+
 The header records three measured alternatives that were rejected: reporting
 the flip with a `2` (forces a stop at the buffer end — 3.2–6.1% slower, 14
 bytes larger, 8 bytes more context), specialising for power-of-two sizes, and

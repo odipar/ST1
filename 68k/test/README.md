@@ -1,10 +1,20 @@
 # Real-hardware validation
 
-[jx1_hatari.S](jx1_hatari.S) is a TOS program that exercises
-[../jx1_68000.S](../jx1_68000.S) on a real 68000 — under
+Two TOS programs exercise the decompressors on a real 68000 — under
 [Hatari](https://hatari.tuxfamily.org/)'s cycle-exact Atari ST emulation, or on
-actual silicon. It decompresses embedded jx1 streams and verifies every byte,
-then measures decode time with the system's 200 Hz tick.
+actual silicon (`rmac -p` emits a plain `.PRG`; copy it to a floppy or Gotek
+and run it). Both decompress embedded jx1 streams, verify every byte, and
+measure decode time with the system's 200 Hz tick:
+
+* [jx1_hatari.S](jx1_hatari.S) — [../jx1_68000.S](../jx1_68000.S), the linear
+  decompressor
+* [jx1_hatari_ring.S](jx1_hatari_ring.S) —
+  [../jx1_68000_ring.S](../jx1_68000_ring.S), streaming each corpus through
+  256- and 1024-byte rings at chunk 16 and 127. Nothing is accumulated: each
+  call's output is compared against the expected image as it is drained, and
+  the wrap is detected the way the interface intends (`a1 == a4`). The point
+  of the feature is visible here — 32000 bytes decompressed through a
+  256-byte buffer.
 
 ```sh
 mvn compile                 # in the repo root: the compressor makes the streams
@@ -12,8 +22,9 @@ HATARI=/path/to/hatari TOS=/path/to/tos.img 68k/test/run.sh
 ```
 
 `run.sh` generates the corpora ([gendata.py](gendata.py) — the same seven the
-emulator rig uses, same RNG stream), assembles with `rmac -p +o3`, and runs
-Hatari headless with console output on stdout.
+emulator rig uses, same RNG stream, plus a `-m256` stream per corpus for the
+ring), assembles both programs with `rmac -p +o3`, and runs them under Hatari
+headless with console output on stdout.
 
 > **`+o3` matters.** `jx1_68000.S` writes `move.l d1,ctx_packed(a5)` with
 > `ctx_packed = 0`; vasm folds `0(a5)` to `(a5)` on its own, rmac only with
@@ -29,6 +40,8 @@ widened its byte moves — Unicorn does not fault odd `.w`/`.l` accesses, so thi
 class of bug is invisible to the emulator rig.
 
 Result: **all cases pass**, at every chunk size, at both destination parities.
+The ring program passes all 28 of its configurations too (7 corpora × 2 ring
+sizes × 2 chunk sizes), every byte checked against the expected image.
 
 ## Timing vs the cycle model
 
@@ -52,6 +65,19 @@ count, so the host can convert without assuming anything about the clock. A
 | rle32k | 127 | 511556 | 533333 | +4.3% |
 | maxoffset | 16 | 1160802 | 1266667 | +9.1% |
 | maxoffset | 127 | 552446 | 580000 | +5.0% |
+
+The ring decompressor, measured the same way at ring 1024 / chunk 16, lands
+in the same band — **+8.0% to +9.2%** over its model (mean +8.6%):
+
+| corpus | model | ST measured | ST vs model |
+|---|---|---|---|
+| text | 17894 | 19500 | +9.0% |
+| wordsoup | 281588 | 304000 | +8.0% |
+| farmatch | 122090 | 132667 | +8.7% |
+| period129 | 44740 | 48600 | +8.6% |
+| allsame | 42742 | 46400 | +8.6% |
+| rle32k | 1340624 | 1453333 | +8.4% |
+| maxoffset | 1343450 | 1466667 | +9.2% |
 
 **The model holds.** Real ST decode time runs **+4.3% to +10.0%** above the
 idealized 68000 cycle counts (mean +7.4%) — the gap is interrupt service and
