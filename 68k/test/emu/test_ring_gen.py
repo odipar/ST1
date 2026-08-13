@@ -9,12 +9,24 @@ from pathlib import Path
 
 SCRATCH = Path(__file__).resolve().parent
 ARGS = list(sys.argv)
+import sys as _s
+QUICK = '--quick' in _s.argv        # the whole matrix runs by default; --quick
+                                    # drops the combinations whose cost is calls,
+                                    # not coverage - a 32K corpus through a
+                                    # 1-byte ring is 32000 emulated calls
+
+
+def _too_slow(data, n, chunk):
+    return QUICK and len(data) // max(1, min(chunk, n)) > 1200
+
+
 sp = importlib.util.spec_from_file_location('t', SCRATCH / 'test68k.py')
-sys.argv = ['x', ARGS[1] if len(ARGS) > 1 else 'jx1_68000_ring.bin']
+POS = [a for a in ARGS[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
+sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE
-from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A3,
+from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A3,
                                 UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_D0,
                                 UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
                                 UC_M68K_REG_D4, UC_M68K_REG_D5,
@@ -51,10 +63,14 @@ def run_ring(compressed, expected, n, chunk, ring):
         for reg in CLOBBERED:               # the ABI calls these clobbered, so
             uc.reg_write(reg, 0xBEEF0000)   # a caller may pass anything in them
         r = t.call(uc, ENTRY_RESUME)
-        dst = int.from_bytes(uc.mem_read(t.CTX + CTX_DST, 4), 'big')
+        dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         assert dst >= prev, f'write pointer went backwards inside a call: {dst} < {prev}'
         out += uc.mem_read(prev, dst - prev)
-        prev = ring if dst == ring + n else dst      # full: next call restarts
+        if dst == ring + n:                     # full: hand the write pointer back
+            uc.reg_write(UC_M68K_REG_A1, ring)  # wrapped. This decoder wraps for
+            prev = ring                         # you, so it is a no-op here - but
+        else:                                   # it is what ring_mod requires, and
+            prev = dst                          # a legal caller may always do it
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
         assert uc.reg_read(UC_M68K_REG_A3) == ring, 'a3 clobbered'
         assert uc.reg_read(UC_M68K_REG_A4) == ring + n, 'a4 clobbered'
@@ -73,6 +89,8 @@ def main():
     failures = 0
     for name, data, m in t.testcases():
         for n, chunk in sizes:
+            if _too_slow(data, n, chunk):
+                continue
             compressed = t.java_compress(data, min(n, 32512))
             try:
                 out = run_ring(compressed, data, n, chunk, t.DST + 3)   # odd base

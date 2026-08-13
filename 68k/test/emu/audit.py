@@ -57,7 +57,10 @@ for f in FILES:
 for f in FILES:
     src = (K68 / f).read_text()
     check('move.w  #$8080,d0' in src, f'{f}: init packs bits+START as $8080')
-    check('movem.l d3/a0-a2,(a5)' in src, f'{f}: init stores the context in one movem')
+    # the linear version keeps the write pointer in the context (a1); the rings
+    # hand it to the caller, so their movem is one register shorter
+    movem = 'movem.l d3/a0-a2,(a5)' if f == 'jx1_68000.S' else 'movem.l d3/a0/a2,(a5)'
+    check(movem in src, f'{f}: init stores the context in one movem')
     check('bmi.s   entry_special' in src, f'{f}: entry dispatches on the sign')
     check('moveq   #0,d4' in src, f'{f}: LITERALS = 0')
     check('st      (a5)' in src, f'{f}: DONE stored with st')

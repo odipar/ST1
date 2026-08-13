@@ -8,9 +8,10 @@ from pathlib import Path
 SCRATCH = Path(__file__).resolve().parent
 ARGS = list(sys.argv)
 sp = importlib.util.spec_from_file_location('t', SCRATCH / 'test68k.py')
-sys.argv = ['x', ARGS[1] if len(ARGS) > 1 else 'jx1_68000_ring.bin']
+POS = [a for a in ARGS[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
+sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
-from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A3,
+from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A3,
                                 UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_D0,
                                 UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
                                 UC_M68K_REG_D4, UC_M68K_REG_D5)
@@ -25,6 +26,7 @@ def run(data, n, chunk, poison):
     uc.reg_write(UC_M68K_REG_D0, chunk); uc.reg_write(UC_M68K_REG_A5, t.CTX)
     t.call(uc, t.CODE)
     uc.reg_write(UC_M68K_REG_A3, ring); uc.reg_write(UC_M68K_REG_A4, ring + n)
+    uc.reg_write(UC_M68K_REG_A1, ring)         # the caller holds the write pointer
     out, prev, calls = bytearray(), ring, 0
     while True:
         calls += 1
@@ -36,7 +38,7 @@ def run(data, n, chunk, poison):
             rc = t.call(uc, ENTRY)
         except Exception as e:
             return f'HANG/FAULT ({str(e)[:28]})'
-        dst = int.from_bytes(uc.mem_read(t.CTX + 8, 4), 'big')
+        dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         if not (ring <= dst <= ring + n):
             return f'DST OUT OF RING ({dst - ring})'
         out += uc.mem_read(prev, max(0, dst - prev))
@@ -45,8 +47,8 @@ def run(data, n, chunk, poison):
             break
     return 'ok' if bytes(out) == data else f'WRONG ({len(out)} of {len(data)} bytes)'
 
-BIN = ARGS[1] if len(ARGS) > 1 else 'jx1_68000_ring.bin'
-ENTRY = t.CODE + (8 if len(ARGS) > 2 and ARGS[2] == 'linear' else 4)
+BIN = POS[0] if POS else 'jx1_68000_ring.bin'
+ENTRY = t.CODE + (8 if len(POS) > 1 and POS[1] == 'linear' else 4)
 for name, data, _ in t.testcases():
     if name not in ('word-soup', 'rle-32k'):
         continue

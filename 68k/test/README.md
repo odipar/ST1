@@ -147,54 +147,59 @@ size X.
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
 several times the buffer it streams through — lands in the same band,
-**+7.6% to +8.9%** over its model (mean +8.2%):
+**+6.4% to +7.7%** over its model (mean +7.0%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16622 | 18100 | +8.9% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 266016 | 288000 | +8.3% |
-| farmatch | 410 | 2900 | 1024 | 16 | 112084 | 120667 | +7.7% |
-| period129 | 138 | 1032 | 1024 | 16 | 41168 | 44600 | +8.3% |
-| allsame | 6 | 1000 | 1024 | 16 | 39372 | 42600 | +8.2% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1232532 | 1326667 | +7.6% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1214556 | 1313333 | +8.1% |
+| text | 28 | 360 | 1024 | 16 | 16438 | 17700 | +7.7% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 264524 | 284000 | +7.4% |
+| farmatch | 410 | 2900 | 1024 | 16 | 110600 | 118000 | +6.7% |
+| period129 | 138 | 1032 | 1024 | 16 | 40634 | 43600 | +7.3% |
+| allsame | 6 | 1000 | 1024 | 16 | 38868 | 41600 | +7.0% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1216098 | 1293333 | +6.4% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1197596 | 1280000 | +6.9% |
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
-spends that on a cheaper entry, measured on the same shape:
+spends that on a cheaper entry, on the same shape. Its model column includes
+**the caller's wrap** (`cmpa.l a4,a1 / bne.s / movea.l a3,a1`), since that
+decoder does not wrap for you and the timed loop therefore executes it:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16162 | 17500 | +8.3% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 262332 | 282667 | +7.8% |
-| farmatch | 410 | 2900 | 1024 | 16 | 108420 | 116667 | +7.6% |
-| period129 | 138 | 1032 | 1024 | 16 | 39856 | 43000 | +7.9% |
-| allsame | 6 | 1000 | 1024 | 16 | 38112 | 41000 | +7.6% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1192160 | 1280000 | +7.4% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1172892 | 1260000 | +7.4% |
+| text | 28 | 360 | 1024 | 16 | 15932 | 17100 | +7.3% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 260510 | 280000 | +7.5% |
+| farmatch | 410 | 2900 | 1024 | 16 | 106608 | 113333 | +6.3% |
+| period129 | 138 | 1032 | 1024 | 16 | 39210 | 42000 | +7.1% |
+| allsame | 6 | 1000 | 1024 | 16 | 37482 | 40000 | +6.7% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1172284 | 1246667 | +6.3% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1152380 | 1226667 | +6.4% |
 
-Same band (+7.4% to +8.3%, mean +7.7%), and the two tables also **confirm the
-optimisation on hardware independently of the model**: at identical corpora,
-ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
-190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
-+3.4% the model predicted — agreement within the ±1 tick resolution.
-
-`jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
-spends that on a cheaper entry, on the same shape:
+Same band (+6.3% to +7.5%, mean +6.8%). Side by side, in raw ticks:
 
 | corpus | ring | ring_mod | ring_mod gain |
 |---|---|---|---|
-| text | 181 | 175 | +3.3% |
-| wordsoup | 216 | 212 | +1.9% |
-| farmatch | 181 | 175 | +3.3% |
-| period129 | 223 | 215 | +3.6% |
-| allsame | 213 | 205 | +3.8% |
-| rle32k | 199 | 192 | +3.5% |
-| maxoffset | 197 | 189 | +4.1% |
+| text | 177 | 171 | +3.4% |
+| wordsoup | 213 | 210 | +1.4% |
+| farmatch | 177 | 170 | +4.0% |
+| period129 | 218 | 210 | +3.7% |
+| allsame | 208 | 200 | +3.8% |
+| rle32k | 194 | 187 | +3.6% |
+| maxoffset | 192 | 184 | +4.2% |
 
 (ticks, ring 1024, chunk 16, same corpora and calibration.) Both files carry
-the same entry optimisations, so what the last column shows is the
-divisibility requirement alone, against the +1.5–3.4% the cycle model
-predicted for it.
+the same entry optimisations, so the last column is the divisibility
+requirement alone — measured **+1.4% to +4.2%**, against the +1.5% to +3.8%
+the cycle model predicts for it, and with the caller's wrap on ring_mod's
+side of the ledger.
+
+These tables also **confirm an optimisation on hardware independently of the
+model**. Handing the write pointer to the caller — a1 in and out, instead of
+a context field reloaded and stored every call — was predicted to be worth
+about 1–4%. Measured on the same shape, the ticks fell from
+181/216/181/223/213/199/197 to 177/213/177/218/208/194/192 for the ring
+(**+1.4% to +2.5%**) and from 175/212/175/215/205/192/189 to
+171/210/170/210/200/187/184 for ring_mod (**+0.9% to +2.9%**), while the
+context shrank from 16 to 12 bytes.
 
 **The model holds.** Real ST decode time runs **+4.1% to +9.1%** above the
 idealized 68000 cycle counts (mean +7.0%) — the gap is interrupt service and
