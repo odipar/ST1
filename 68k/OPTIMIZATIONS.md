@@ -361,3 +361,54 @@ recorded here for that future case.
 sit before the table restores the base-register-free
 `add.w gtab(pc,d0.w),d3` (the entry rides the existing bcs, only the return
 pays a bra.w): +0.63% word-soup, +0.44% text, ~0 elsewhere, no size change.
+
+## Round 5: the full-chunk continuation fast path (x16)
+
+Profile arithmetic after Round 4: a long op that spans chunks pays, at EVERY
+boundary, a budget refresh + re-entry branch (14), the folded take_budget
+(28), and the ladder dispatch arithmetic + indexed jmp (50; the `lsr.w #5`
+alone is 16) - ~90+ cycles of pure bookkeeping per 16 copied bytes. But at a
+chunk boundary the budget is `chunk` *by construction*, so the general
+min/clamp/dispatch collapses into two trivial cases:
+
+* **partial** (`remaining < chunk`): the op ends inside this chunk, so
+  n = remaining, remaining' = 0, budget' = chunk - n - three moves replace
+  take_budget entirely, then jump to the existing dispatch arithmetic;
+* **full** (`remaining >= chunk`): n = chunk, which is a *stream constant* -
+  jx1_init precomputes the ladder pass count (`chunk >> 5`, patched into a
+  `moveq` immediate) and the ladder entry index (`-2*(chunk & 31)`, patched
+  into a `move.w` immediate), so the whole clamp + dispatch pipeline is
+  skipped: budget' = 0, load the two constants, jump straight at the ladder.
+
+Both flavors live in new `lit_cont`/`match_cont` blocks: in-batch boundaries
+fall into them after the `jsr (a6)` callback, and call re-entries arrive via
+the patched `entry_bra` (suspend now targets the cont blocks). Fresh ops
+parsed mid-chunk never touch the check. The match-source `lea` moved after
+the dispatch arithmetic so the full path reuses the one SMC-patched
+`match_lea` - no second patch site, no tax on `got_offset`.
+
+**The regression that shaped the design:** the first version put a
+check-then-branch *in front of* the unchanged take_budget path, taxing every
+partial boundary +18 cycles - word-soup (parse-heavy, nearly all partials)
+measured -1.9..-2.9%. Restructured so the boundary check *replaces*
+take_budget, partials come out 12 cycles CHEAPER than Round 4 and fulls keep
+-42: word-soup went from -2.9% to neutral-positive on the batched path.
+
+Measured A/B vs the Round-4 x16 at chunk 16 (plain / k=4 / k=8):
+
+| corpus | plain | k=4 | k=8 |
+|---|---|---|---|
+| word-soup | -1.05% | +0.01% | +0.21% |
+| text | +3.01% | +5.72% | +6.29% |
+| far-match | +5.32% | +9.04% | +9.82% |
+| all-same | +5.03% | +8.66% | +9.43% |
+| max-offset | +5.50% | +9.32% | +10.11% |
+| rle-32k | +5.65% | +9.53% | +10.33% |
+
+The one honest cost: plain-resume word-soup -1.05% (each per-call re-entry
+pays +12 on a partial, and parse-heavy streams are nearly all partials);
+every batched cell is >= 0. New totals vs opt7 at chunk 16: plain
+**+15.9..+19.3%**, k=4 **+27.5..+34.9%**, k=8 **+28.8..+37.8%**. Size
+1034 -> 1114 bytes; context and ABI unchanged. Verified: 13-case harness at
+chunks 16/1/7/127, batched API at k=2/4/8 with d4-preservation checks, and
+the even/odd destination alignment audit.

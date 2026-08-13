@@ -28,6 +28,22 @@
 ;   d2/d3/d6/d7/a0/a1/a5/a6. d4 is never touched by the decompressor:
 ;   it belongs to the caller across all calls and callbacks.
 ;
+; Round 4 - the two-byte offset decode moved next to its table: the lookup
+;   is base-register-free again (add.w gtab(pc,d0.w)). +0.63% word-soup,
+;   +0.44% text.
+;
+; Round 5 - full-chunk continuation fast path: at a chunk boundary the
+;   budget is chunk BY CONSTRUCTION, so the lit_cont/match_cont blocks
+;   replace take_budget with one compare - a partial final chunk computes
+;   n = remaining, budget = chunk - n directly (12 cycles cheaper than the
+;   general path), and a full chunk loads the init-patched constants
+;   (ladder passes = chunk>>5, index = -2*(chunk&31)) and jumps straight
+;   at the ladder, skipping clamp and dispatch arithmetic (~42 cycles per
+;   continued chunk). In-batch boundaries fall in after the callback; call
+;   re-entries arrive via the patched entry_bra. +5-10% on copy-dominated
+;   corpora, batched word-soup neutral; the one cost is plain-resume
+;   word-soup -1.05%.
+;
 ; Inherited from the combo: smc3's split literals/match bodies (op type in
 ; the program counter, suspend-patched entry bra.w, match source via a
 ; patched lea holding -lastOffset), woven per-body gammas with a d0 length
@@ -36,15 +52,16 @@
 ; (L & 254) + G[H]).
 ;
 ; Measured at chunk 16 vs jx1_68000_opt7.S:
-;   plain resume:     +11.0% .. +19.7%
-;   batched k = 4:    +27.0% .. +28.0%
-;   batched k = 8:    +28.2% .. +30.6%   (all six corpora positive)
+;   plain resume:     +15.9% .. +19.3%
+;   batched k = 4:    +27.5% .. +34.9%
+;   batched k = 8:    +28.8% .. +37.8%   (all six corpora positive)
 ;
 ; SMC caveats (by construction): code must live in RAM; SINGLE ACTIVE
 ; CONTEXT (jx1_init re-arms all patched defaults, so sequential streams are
 ; fine); plain 68000; prefetch-safe (entry_bra is patched only by code that
 ; returns first; match_lea's word is written a whole gamma parse before it
-; can execute); position-independent (patches via lea (pc)).
+; can execute; the fast-path constants are patched only in jx1_init);
+; position-independent (patches via lea (pc)).
 ;
 ; Same assumptions as jx1_68000_opt.S, undefined when violated:
 ;
@@ -91,6 +108,19 @@ jx1_init:
         move.w  #begin_literals-entry_bra-2,(a1)
         lea     match_lea+2(pc),a1      ; SMC: match source = -INITIAL_OFFSET
         move.w  #-1,(a1)
+        move.w  d0,d1                   ; SMC: the full-chunk fast-path constants
+        and.w   #31,d1                  ; (chunk is fixed per stream, so the
+        add.w   d1,d1                   ; ladder entry for a whole-chunk copy
+        neg.w   d1                      ; is precomputable): index = -2*(chunk&31)
+        lsr.w   #5,d0                   ; and full ladder passes = chunk>>5
+        lea     fast_idx_l+2(pc),a1
+        move.w  d1,(a1)
+        lea     fast_idx_m+2(pc),a1
+        move.w  d1,(a1)
+        lea     fast_pass_l+1(pc),a1    ; the moveq immediates (low bytes)
+        move.b  d0,(a1)
+        lea     fast_pass_m+1(pc),a1
+        move.b  d0,(a1)
         rts
 
 ; -----------------------------------------------------------------------------
@@ -170,11 +200,13 @@ lit_resume:                             ; entry_bra target while mid-literals
 .fits:
         sub.w   d0,d3
         sub.w   d0,d5
+lit_calc:                               ; boundary partials re-enter here
         move.w  d0,d1
         lsr.w   #5,d1                   ; a 32-step ladder: every chunk-16 copy
         and.w   #31,d0                  ; is a pure partial entry, zero dbf
         add.w   d0,d0                   ; passes (fill32's measured insight)
         neg.w   d0                      ; index = -2*(n&31)
+lit_go:                                 ; boundary fulls: d0/d1/d5 pre-set
         jmp     lit_end(pc,d0.w)
 lit_ladder:
         move.b  (a0)+,(a1)+
@@ -221,8 +253,8 @@ lit_end:
 suspend_lit:                            ; chunk boundary while in literals
         subq.w  #1,d6
         bne.s   more_chunks_lit         ; batch not exhausted: stay in registers
-        lea     entry_bra+2(pc),a2      ; SMC: resume straight into lit_resume
-        move.w  #lit_resume-entry_bra-2,(a2)
+        lea     entry_bra+2(pc),a2      ; SMC: resume straight into lit_cont
+        move.w  #lit_cont-entry_bra-2,(a2)
         move.b  d2,-(a5)                ; bit buffer (no state byte: entry_bra is
         subq.l  #2,a5                   ; the state); skip the chunk word
         movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = context base
@@ -230,8 +262,21 @@ suspend_lit:                            ; chunk boundary while in literals
         rts
 more_chunks_lit:
         jsr     (a6)                    ; the caller's between-chunk work
-        move.w  d7,d5                   ; fresh budget
-        bra.w   lit_resume
+lit_cont:                               ; mid-literals continuation: in-batch
+        move.w  d3,d0                   ; boundaries fall in, call re-entries
+        sub.w   d7,d3                   ; arrive via the patched entry_bra.
+        bcc.s   lit_full                ; budget == chunk here by construction,
+        clr.w   d3                      ; so this REPLACES take_budget: partial
+        move.w  d7,d5                   ; means the op's last chunk - n =
+        sub.w   d0,d5                   ; remaining, budget = chunk - n, done
+        bra.w   lit_calc
+lit_full:                               ; a whole chunk pending: n = chunk is
+        moveq   #0,d5                   ; a stream constant, so the dispatch
+fast_pass_l:                            ; values are precomputed -
+        moveq   #0,d1                   ; SMC: ladder passes = chunk>>5
+fast_idx_l:
+        move.w  #0,d0                   ; SMC: ladder index = -2*(chunk&31)
+        bra.w   lit_go
 
 ; ------------------------------- offset decode ------------------------------
 new_offset:                             ; d3.w is provably 0 here (the dead
@@ -279,14 +324,16 @@ match_resume:                           ; entry_bra target while mid-match
 .fits:
         sub.w   d0,d3
         sub.w   d0,d5
-match_lea:
-        lea     -1(a1),a2               ; SMC: extension word = -lastOffset,
-                                        ; patched at got_offset / jx1_init
+match_calc:                             ; boundary partials re-enter here
         move.w  d0,d1
         lsr.w   #5,d1                   ; a 32-step ladder: every chunk-16 copy
         and.w   #31,d0                  ; is a pure partial entry, zero dbf
         add.w   d0,d0                   ; passes (fill32's measured insight)
         neg.w   d0                      ; index = -2*(n&31)
+match_go:                               ; boundary fulls: d0/d1/d5 pre-set
+match_lea:
+        lea     -1(a1),a2               ; SMC: extension word = -lastOffset,
+                                        ; patched at got_offset / jx1_init
         jmp     match_end(pc,d0.w)
 match_ladder:
         move.b  (a2)+,(a1)+
@@ -332,8 +379,8 @@ match_end:
 suspend_match:                          ; chunk boundary while in a match
         subq.w  #1,d6
         bne.s   more_chunks_match       ; batch not exhausted: stay in registers
-        lea     entry_bra+2(pc),a2      ; SMC: resume straight into match_resume
-        move.w  #match_resume-entry_bra-2,(a2)
+        lea     entry_bra+2(pc),a2      ; SMC: resume straight into match_cont
+        move.w  #match_cont-entry_bra-2,(a2)
         move.b  d2,-(a5)                ; bit buffer
         subq.l  #2,a5                   ; skip the chunk word
         movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = context base
@@ -341,8 +388,21 @@ suspend_match:                          ; chunk boundary while in a match
         rts
 more_chunks_match:
         jsr     (a6)                    ; the caller's between-chunk work
-        move.w  d7,d5                   ; fresh budget
-        bra.w   match_resume
+match_cont:                             ; mid-match continuation: in-batch
+        move.w  d3,d0                   ; boundaries fall in, call re-entries
+        sub.w   d7,d3                   ; arrive via the patched entry_bra.
+        bcc.s   match_full              ; budget == chunk here by construction,
+        clr.w   d3                      ; so this REPLACES take_budget: partial
+        move.w  d7,d5                   ; means the op's last chunk - n =
+        sub.w   d0,d5                   ; remaining, budget = chunk - n, done
+        bra.w   match_calc
+match_full:                             ; a whole chunk pending: n = chunk is
+        moveq   #0,d5                   ; a stream constant, so the dispatch
+fast_pass_m:                            ; values are precomputed -
+        moveq   #0,d1                   ; SMC: ladder passes = chunk>>5
+fast_idx_m:
+        move.w  #0,d0                   ; SMC: ladder index = -2*(chunk&31)
+        bra.w   match_go
 
 end_marker:                             ; State.DONE
         lea     entry_bra+2(pc),a2      ; SMC: every later call returns 0 via
