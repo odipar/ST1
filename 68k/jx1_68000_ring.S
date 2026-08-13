@@ -55,9 +55,18 @@
 ;       tst.w   d0
 ;       bne.s   .loop
 ;
-; Because the budget is clamped to the room, a call near the end of the
-; buffer produces FEWER than chunkSize bytes; a caller must use the write
-; pointer, not an assumed chunk size.
+; Because the budget is clamped to the room, a call that runs into the end of
+; the buffer produces FEWER than chunkSize bytes, so in general a caller must
+; use the write pointer rather than an assumed chunk size.
+;
+; Sizing the buffer as a multiple of the chunk removes that case entirely.
+; dst - start is then a multiple of chunkSize at every entry - it starts at 0,
+; a call returning 1 wrote exactly the budget, and a full buffer restarts at 0
+; - so the room is a multiple of chunkSize as well, never less than it, and
+; the clamp never bites. Every call emits exactly chunkSize bytes and returns
+; 1, except the final one, which returns 0 with the last (output mod
+; chunkSize) bytes, or a full chunk when the output divides evenly. Callers
+; that want fixed-size blocks should pick their sizes that way.
 ;
 ; Assumptions, undefined when violated:
 ;
