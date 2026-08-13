@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Differential test: 68k dzx1_68000.S (emulated with Unicorn) vs Java Zx1-compressed streams."""
+import hashlib
 import math
 import subprocess
 import tempfile
@@ -33,15 +34,46 @@ def _binary(name):
     return out.read_bytes()
 
 
-BIN = _binary(sys.argv[1] if len(sys.argv) > 1 else 'jx1_68000.bin')
-CHUNKS = [int(c) for c in sys.argv[2].split(',')] if len(sys.argv) > 2 else [16, 1, 7, 1 << 30]
-SRC_OFF, DST_OFF = ([int(o) for o in sys.argv[3].split(',')] if len(sys.argv) > 3 else [8, 12])
+POS = [a for a in sys.argv[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
+BIN = _binary(POS[0] if POS else 'jx1_68000.bin')
+CHUNKS = [int(c) for c in POS[1].split(',')] if len(POS) > 1 else [16, 1, 7, 127]
+SRC_OFF, DST_OFF = ([int(o) for o in POS[2].split(',')] if len(POS) > 2 else [4, 8])
+QUICK = '--quick' in sys.argv     # the whole matrix runs by default: with the
+                                  # streams cached below, every combination
+                                  # together costs a few seconds. --quick drops
+                                  # the ones whose cost is calls, not coverage
 
 CODE, CTX, SRC, DST, STACK_TOP, MAGIC = 0x1000, 0x20000, 0x40000, 0x80000, 0xF8000, 0xE0000
 ENTRY_INIT, ENTRY_DECOMPRESS, ENTRY_RESUME = CODE + 0, CODE + 4, CODE + 8
 CTX_SIZE = 22
 
+CACHE = SCRATCH / '.streams'      # optimal parsing is quadratic-ish in the match
+                                  # window, so a 32K corpus costs seconds to
+                                  # compress and every script here wants the same
+                                  # streams: compress each (corpus, -m) once
+
+
+def _compressor_id() -> str:
+    """Fingerprint of the compiled compressor.
+
+    The cache below is only sound if it cannot survive a change to the thing it
+    is caching - these tests exist to catch exactly that. Keying on the class
+    files means any recompile of the Java side invalidates every stream.
+    """
+    h = hashlib.sha1()
+    for f in sorted(Path(CP).rglob('*.class')):
+        st = f.stat()
+        h.update(f'{f}:{st.st_size}:{st.st_mtime_ns}'.encode())
+    return h.hexdigest()[:12]
+
+
+COMPRESSOR = _compressor_id()
+
+
 def java_compress(data: bytes, m: int | None) -> bytes:
+    key = CACHE / f'{COMPRESSOR}-{hashlib.sha1(data).hexdigest()[:16]}-m{m}.zx1'
+    if key.exists():
+        return key.read_bytes()
     with tempfile.TemporaryDirectory() as d:
         src, dst = Path(d, 'in.bin'), Path(d, 'out.zx1')
         src.write_bytes(data)
@@ -49,7 +81,10 @@ def java_compress(data: bytes, m: int | None) -> bytes:
         if m is not None:
             args.append(f'-m{m}')
         subprocess.run(args + [str(src), str(dst)], check=True, capture_output=True)
-        return dst.read_bytes()
+        out = dst.read_bytes()
+    CACHE.mkdir(exist_ok=True)
+    key.write_bytes(out)           # keyed by corpus content AND compiled
+    return out                     # compressor: both invalidate on any change
 
 def make_emu(compressed: bytes) -> Uc:
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
@@ -141,7 +176,8 @@ def main() -> None:
         compressed = java_compress(data, m)
         run_oneshot(compressed, data)
         for chunk in CHUNKS:
-            if chunk == 1 and len(data) > 5000:
+            if QUICK and (len(data) // max(1, chunk) > 1200
+                          or (chunk == 1 and len(data) > 5000)):
                 continue
             run_resumable(compressed, data, chunk)
         print(f'PASS {name} ({len(data)} -> {len(compressed)} bytes)')

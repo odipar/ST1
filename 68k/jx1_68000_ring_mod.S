@@ -55,10 +55,11 @@
 ;    that one compare per call, and one clamp per match segment: work per
 ;    CALL and per MATCH, never per byte.
 ;
-; 3. THE RING BOUNDS ARE NOT STATE. The caller already holds them - it needs
-;    them to drain - so it passes them read-only in a3/a4 instead of the
-;    decompressor storing and reloading them. The context is 16 bytes: the
-;    ring costs none.
+; 3. THE POINTERS ARE NOT STATE. The caller already holds the ring bounds -
+;    it needs them to drain - so it passes them read-only in a3/a4, and it
+;    holds the write pointer in a1 for the same reason. The context is left
+;    with the parse state alone, 12 bytes: four FEWER than the linear
+;    decompressor needs, because that one has to store its destination.
 ;
 ; A match source running into the end of the buffer still splits a copy into
 ; segments, so the rolled-out ladder itself never needs a bounds test. The
@@ -70,14 +71,16 @@
 ; pointer never wraps during a call, so a full buffer simply shows up as the
 ; write pointer reaching the end:
 ;
-;       prev = ring
+;       movea.l ring,a1                 ; the caller holds the write pointer
+;       movea.l a1,prev
 ;   .loop:
-;       bsr     jx1_resume              ; a1 = write pointer
+;       bsr     jx1_resume
 ;       ; consume [prev .. a1)
 ;       movea.l a1,prev
-;       cmpa.l  a4,a1                   ; buffer full? the next call restarts
-;       bne.s   .more                   ; at the beginning of the buffer
-;       movea.l a3,prev
+;       cmpa.l  a4,a1                   ; buffer full?
+;       bne.s   .more
+;       movea.l a3,a1                   ; wrap it: this decoder will not
+;       movea.l a1,prev
 ;   .more:
 ;       tst.w   d0
 ;       bne.s   .loop
@@ -99,24 +102,25 @@
 ;      32512, so a larger ring could never be referenced anyway
 ;   5. no back-reference offset exceeds the ring buffer size N
 ;
-; The context must be word-aligned and is 16 bytes.
+; The context must be word-aligned and is 12 bytes.
 ;
-; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
-; a5 = context and the ring bounds a3/a4 untouched. (d4 carries the op
+; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0/a2 and leave
+; a5 = context and the ring bounds a3/a4 untouched; a1 is the caller's write
+; pointer, taken in and handed back. (d4 carries the op
 ; state.) d6/d7 and a6 are never touched.
 ; -----------------------------------------------------------------------------
 
-; Context block (Java: Decompressor's fields). The first three longwords are
-; laid out in movem order d3,a0,a1.
+; Context block (Java: Decompressor's fields). The write pointer is NOT here:
+; like the ring bounds, the caller holds it. The three longwords are in movem
+; order d3,a0,a2.
 ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
 ctx_src         equ     4               ; .l  a0: input position
-ctx_dst         equ     8               ; .l  a1: write position (Java: bufferIndex)
-ctx_chunk       equ     12              ; .w  chunkSize (X), 1..127 (a word: the
+ctx_chunk       equ     8               ; .w  chunkSize (X), 1..127 (a word: the
                                         ;     budget is only ever used word-wide,
                                         ;     so the entry loads it as one)
-ctx_bits        equ     14              ; .b  bit buffer
-ctx_state       equ     15              ; .b  State: $80 START, 0 LITERALS,
-ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed so the
+ctx_bits        equ     10              ; .b  bit buffer
+ctx_state       equ     11              ; .b  State: $80 START, 0 LITERALS,
+ctx_size        equ     12              ;     2 MATCH, $FF DONE - signed so the
                                         ;     entry dispatches on the load's flags
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
@@ -135,8 +139,8 @@ jx1_init:
         swap    d3                      ; lastOffset = INITIAL_OFFSET, remaining = 0
         swap    d0                      ; the last longword is the chunk word,
         move.w  #$8080,d0               ; an empty bit buffer and State.START,
-        movea.l d0,a2                   ; so the whole context is four registers
-        movem.l d3/a0-a2,(a5)           ; in movem order and one store
+        movea.l d0,a2                   ; so the whole context is three registers
+        movem.l d3/a0/a2,(a5)           ; in movem order and one store
         rts
 
 entry_special:                          ; the negative states, both rare
@@ -149,23 +153,24 @@ entry_done:
         rts
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a5 = context, a3 = ring buffer start, a4 = ring buffer end
-;             (start + N); both read-only and unchanged on return.
+; jx1_resume: a5 = context, a1 = write pointer, a3 = ring buffer start,
+;             a4 = ring buffer end (start + N). a3/a4 are read-only and come
+;             back unchanged; a1 is IN and OUT - the caller keeps it across
+;             calls, exactly as it keeps the bounds.
 ; Emits at most ctx_chunk output bytes, and at most as many as fit before the
 ; end of the ring buffer. Returns d0 = 0 when the stream is fully processed,
 ; 1 when there is more; a1 = the write pointer, which is the caller's cue:
 ; everything between its previous value and a1 is new output, and when a1
-; reaches a4 the buffer is full and the next call restarts at a3.
+; reaches a4 the buffer is full.  Wrap a1 back to a3
+; before the next call - this entry does not do it for you.
 ; Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 jx1_resume:
-        movem.l (a5)+,d3/a0-a1          ; packed offset/remaining, src, dst
+        movem.l (a5)+,d3/a0             ; packed offset/remaining, src; a1 is
+                                        ; the caller's, like a3/a4
         move.w  (a5)+,d5                ; budget = chunkSize
         move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
-        cmpa.l  a4,a1                   ; did the previous call fill the buffer
-        bne.s   dst_ready               ; (which the caller has drained by now)?
-        movea.l a3,a1                   ; then start again at its first byte
-dst_ready:                              ; the budget needs no clamping: the
+                              ; the budget needs no clamping: the
                                         ; chunk divides the buffer, so the room
                                         ; is always a whole number of chunks
         move.b  (a5),d4                 ; op state (Java: switch in next()) -
@@ -241,7 +246,7 @@ suspend_more:                           ; Java: resume() returning true
         move.b  d4,(a5)                 ; the interrupted op's state, verbatim
         move.b  d2,-(a5)                ; bit buffer
         subq.l  #2,a5                   ; skip the chunk word
-        movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = base
+        movem.l d3/a0,-(a5)          ; stores in layout order, a5 = base
         moveq   #1,d0                   ; more output pending: call again
         rts
 
@@ -328,6 +333,6 @@ end_marker:                             ; Java: State.DONE - the caller drains
         st      (a5)                    ; State.DONE
         move.b  d2,-(a5)
         subq.l  #2,a5
-        movem.l d3/a0-a1,-(a5)
+        movem.l d3/a0,-(a5)
         moveq   #0,d0                   ; fully processed
         rts

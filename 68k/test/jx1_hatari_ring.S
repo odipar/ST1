@@ -9,7 +9,9 @@
 ; Nothing is accumulated: each call's output is compared against the expected
 ; image as it is drained, which is exactly what a real caller does with it,
 ; and the wrap is detected the way the interface intends - the write pointer
-; never wraps inside a call, so a full buffer shows up as a1 == a4.
+; never wraps inside a call, so a full buffer shows up as a1 == a4. a1 is the
+; caller's: it goes in and comes back out, and for jx1_68000_ring_mod.S the
+; caller wraps it as well.
 ;
 ; Every corpus runs through 256- and 1024-byte rings at chunk 16 and 127, and
 ; is then timed at ring 1024 / chunk 16 against the same calibration loop the
@@ -167,10 +169,13 @@ verify_ring:
         move.l  a1,expptr
 .nodata:
         move.l  curdst,prev
-        movea.l curdst,a0
-        cmpa.l  a4,a0                           ; buffer full? then the next
-        bne.s   .more                           ; call restarts at a3
+        movea.l curdst,a1                       ; the caller holds the write
+        cmpa.l  a4,a1                           ; pointer now: hand it back
+        bne.s   .more                           ; buffer full?
         move.l  a3,prev
+    .if RINGMOD
+        movea.l a3,a1                           ; ring_mod does not wrap for us
+    .endif
 .more:
         tst.w   retcode
         bne.s   .loop
@@ -266,6 +271,12 @@ time_ring:
         bsr     ring_init
 .drain:
         bsr     jx1_resume
+    .if RINGMOD
+        cmpa.l  a4,a1                           ; a real caller folds this into
+        bne.s   .nowrap                         ; the drain branch it already
+        movea.l a3,a1                           ; has; here it is explicit
+.nowrap:
+    .endif
         tst.w   d0
         bne.s   .drain
         subq.l  #1,iters

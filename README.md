@@ -38,8 +38,8 @@ goes, and in what the caller has to promise:
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 298 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 300 B | 16 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 288 B | 16 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 300 B | 12 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 282 B | 12 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -102,33 +102,36 @@ the chunk divides the buffer (below). They share everything else — the same
 parser, copy engine, entry work and interface — so read this section for
 both.
 
-Neither needs a callback, an extra return code, or extra context:
-`jx1_resume` still returns just 0 (done) and 1 (more), and the context is the
-same 16-byte block as the linear version.
+Neither needs a callback or an extra return code: `jx1_resume` still returns
+just 0 (done) and 1 (more). The context is **12 bytes — four fewer than the
+linear version needs**, because the pointers are the caller's: it holds the
+ring bounds in a3/a4 (it needs them to drain) and the write pointer in a1 for
+the same reason, leaving the context holding parse state alone.
 
-`jx1_init` is unchanged except that a1 is the ring buffer. `jx1_resume` (slot
-base+4 — there is no one-shot, since a bounded buffer has to be drained) takes
-the ring bounds as read-only parameters in a3/a4, and leaves the write pointer
-in a1. The caller drains after every call and spots the wrap itself: the write
-pointer never wraps *during* a call, so a full buffer simply shows up as
-`a1 == a4`, and the next call restarts at a3.
+`jx1_resume` (slot base+4 — there is no one-shot, since a bounded buffer has
+to be drained) takes the ring bounds read-only in a3/a4 and the write pointer
+in a1, and hands a1 back. The caller drains after every call and spots the
+wrap itself: the write pointer never wraps *during* a call, so a full buffer
+simply shows up as `a1 == a4`. `jx1_68000_ring.S` then wraps it for you on the
+next call; `jx1_68000_ring_mod.S` does not, so wrap it in the branch you
+already have.
 
 ```
         lea     stream,a0
         lea     ring,a1                 ; N bytes; no alignment requirement
         moveq   #16,d0                  ; chunk size X
-        lea     context,a5              ; 16 bytes, word-aligned
+        lea     context,a5              ; 12 bytes, word-aligned
         bsr     jx1_init
-        lea     ring,a3                 ; ring bounds: parameters, not state
-        lea     ring+4096,a4
+        lea     ring,a3                 ; the pointers are the caller's:
+        lea     ring+4096,a4            ; bounds in a3/a4, write pointer in a1
         movea.l a3,a6                   ; a6 = first undrained byte
 .chunk:
-        bsr     jx1_resume
+        bsr     jx1_resume              ; a1 in and out
         ; consume [a6 .. a1)
         movea.l a1,a6
-        cmpa.l  a4,a1                   ; buffer full? next call restarts at a3
+        cmpa.l  a4,a1                   ; buffer full?
         bne.s   .more
-        movea.l a3,a6
+        movea.l a3,a6                   ; (ring_mod: also movea.l a3,a1)
 .more:
         tst.w   d0
         bne.s   .chunk
