@@ -65,6 +65,14 @@ per-chunk work as a callback: **+27–30.6% over opt7 at chunk 16** with batches
 of 4–8 chunks. The SMC variants require RAM code, a single active context, and
 a plain 68000.
 
+There is also a **chunk-aligned format variant** (`CompressorChunked` /
+`DecompressorChunked` in Java, [68k/jx1_68000_chunked.S](68k/jx1_68000_chunked.S)):
+no op crosses a chunk boundary, so its decoder needs no budget clamp and no
+mid-op state at all. Measured honestly, it stays 4–6% behind `opt_x16` at
+chunk 16 while costing ~20–25% compression ratio — a documented negative
+result (see OPTIMIZATIONS.md), kept for its simplicity and strictly
+deterministic per-chunk decode work.
+
 ## Layout
 
 | Class | Origin |

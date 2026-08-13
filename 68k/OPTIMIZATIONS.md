@@ -282,3 +282,50 @@ harness at chunks 16/1/7/127 on the plain path, the even/odd-destination
 alignment audit, and a dedicated batched-API check (k = 2/4/8 at chunk 16 on
 all 13 corpora: byte-identical output, exact per-batch emission, call counts,
 d4 preservation through calls and callbacks).
+
+## Round 3: the chunk-aligned format (negative result)
+
+The shelved idea "a format where no op crosses a chunk boundary kills
+take_budget entirely" was implemented end to end and measured. Verdict: **it
+does not beat opt_x16 at X = 16** - kept as a working format variant and as
+the record of why.
+
+**Format** (`CompressorChunked.java` / `DecompressorChunked.java` /
+`jx1_68000_chunked.S`): ZX1 op encodings; no op crosses a multiple-of-chunk
+output boundary; each later chunk opens with a boundary code - `0` literals,
+`11` from-last spanning the whole chunk with implied length (no gamma - two
+bits per chunk for boundary-split long matches), `100` partial from-last,
+`101` new-offset/end. Chunk bit-counts stay even, so the refill invariant
+survives (the second boundary bit sits on a refill-exposed even index and is
+the one checked read outside gammas). The encoder is greedy (hash chains),
+not optimal. The 68k decoder (1006 bytes) has no take_budget, no mid-op
+state, and its suspend patch fires once per stream (the smc1 pattern).
+
+**Measured, same original data, chunk 16** (cycles to decompress; positive
+would mean chunked is faster than opt_x16):
+
+| corpus | k=8 | k=1 | size std/chunked |
+|---|---|---|---|
+| word-soup | -4.7% | -2.5% | 818 / 986 |
+| text | -4.6% | -0.7% | 28 / 35 |
+| far-match | -6.0% | -1.3% | 212 / 267 |
+| all-same | -4.1% | +0.2% | 6 / 21 |
+| max-offset | -41.1% | -29.1% | 32589 / 34978 |
+| rle-32k | -4.6% | -0.1% | 7 / 505 |
+
+**Why it loses:** opt_x16's mid-op continuation at a chunk boundary costs
+almost nothing beyond the shared batch handler, while the chunked format
+pays a boundary code plus an op (re)dispatch there, and its per-op
+take_budget saving (~22 cycles) does not cover that. The first iteration
+(without code `11`) lost 33-48% on copy data because every boundary-split
+match piece re-parsed a gamma; code `11` recovered nearly all of that (and
+cut rle-32k's stream from 3003 to 505 bytes) but parity is the ceiling. The
+max-offset outlier is mostly the greedy parser emitting many marginal
+two-byte matches that the optimal parser would reject.
+
+**What it is still good for:** the simplest possible resumable decoder (no
+budget clamp, no op state across calls), strictly deterministic per-chunk
+work, and a ~20-25% ratio cost on typical data (RLE remains its worst case:
+505 bytes vs 7). Verified: Java round-trips at chunks 8/16/32/127, per-call
+emission, a grammar-aware refill-invariant checker, and the 68k against the
+Java oracle on all 13 corpora at k = 1/4/8 with d4 preservation.
