@@ -80,3 +80,12 @@ java -ea -cp target/classes org.jx1.Dzx1 [-f] [-mN] input.zx1 [output]
 ```
 
 See [c/zx1/src](c/zx1/src) for the original source code
+
+## License
+
+Dual, following the original ZX1 (see [LICENSE](LICENSE)): the compressor is
+BSD 3-Clause; the decompressors can be used freely within your own programs,
+even commercially, as long as your documentation indicates you used ZX1/jx1.
+The ZX1 format and algorithm are by Einar Saukas; the additions/differences
+above are © 2026 Robbert van Dalen; the jx1 code and experiments were written
+by Claude (Anthropic's Claude Code) under Robbert's direction.
