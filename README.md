@@ -23,7 +23,7 @@ Additions/differences to the original:
   decompressors
 * **68k target vs z80 target** — a resumable 68000 decompressor ported from the Java
   `Decompressor` state machine, verified byte-identical against Java-compressed streams
-  under cycle-measured emulation
+  under cycle-measured emulation and on real 68000 hardware timing (Atari ST)
 
 ## The 68k decompressor
 
@@ -40,6 +40,39 @@ spot between speed, size, and readability:
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
   longer than 32K, chunk sizes 1..127
+* validated on real 68000 hardware timing, not just emulation — see
+  [68k/test/](68k/test/)
+
+### Calling it
+
+The decompressor is position-independent and has no global state: everything
+lives in a caller-supplied context block of 15 bytes (16 with padding), which
+must be **word-aligned**. `jx1_init` takes the stream in `a0`, the destination
+in `a1`, the chunk size in `d0.b` (1..127) and the context in `a5`; each
+`jx1_resume` then emits at most one chunk and returns `d0 = 0` once the stream
+is fully processed, leaving `a1` at the current end of output:
+
+```
+        lea     stream,a0               ; compressed data
+        lea     output,a1               ; destination
+        moveq   #16,d0                  ; chunk size X
+        lea     context,a5              ; 16 bytes, word-aligned
+        bsr     jx1_init
+.chunk:
+        bsr     jx1_resume              ; at most X bytes per call
+        ; ... per-chunk work here; a1 = end of output so far ...
+        tst.w   d0
+        bne.s   .chunk                  ; Java: while (resume()) { ... }
+```
+
+`jx1_decompress` (a0 = stream, a1 = destination) is the one-shot convenience:
+it runs the whole stream and returns with `a1` at the end of the output.
+
+Both entries clobber `d0-d5/a0-a2` and leave `a5` untouched (`jx1_decompress`
+uses but restores `a5`); `d6/d7` and `a3/a4/a6` are never touched. Matches are
+copied from the destination itself — the output buffer is the window, so it
+must hold everything decompressed so far; there is no separate ring buffer on
+the 68k side (the Java `Decompressor` is the one that offers that).
 
 ## Retired exploration
 
