@@ -408,7 +408,44 @@ Measured A/B vs the Round-4 x16 at chunk 16 (plain / k=4 / k=8):
 The one honest cost: plain-resume word-soup -1.05% (each per-call re-entry
 pays +12 on a partial, and parse-heavy streams are nearly all partials);
 every batched cell is >= 0. New totals vs opt7 at chunk 16: plain
-**+15.9..+19.3%**, k=4 **+27.5..+34.9%**, k=8 **+28.8..+37.8%**. Size
+**+16.5..+19.4%**, k=4 **+27.5..+35.3%**, k=8 **+28.9..+38.2%** (as
+re-measured under the consolidated model - see the audit section). Size
 1034 -> 1114 bytes; context and ABI unchanged. Verified: 13-case harness at
 chunks 16/1/7/127, batched API at k=2/4/8 with d4-preservation checks, and
 the even/odd destination alignment audit.
+
+## Full re-measurement under one consolidated model (audit)
+
+All numbers in the README's two variant tables were re-measured in one run,
+every variant under the SAME cycle model with every correction discovered
+during the campaign applied together: indexed-EA sources op+10, `subi.w` 8,
+`jmp d8(pc,Xn)` 14, `jsr (an)` 16, `clr.w Dn` 4, and - newly applied
+everywhere instead of noted-but-simplified - width-aware not-taken `Bcc`
+(.s = 8, .w = 12; every earlier rig charged 8 for both). Six corpora,
+chunks 16 and 127, plain path for all 18 files plus batched k=4/8 for x16
+and chunked.
+
+Outcome of the audit against the previously published per-round numbers:
+
+* **Confirmed within a tenth of a point:** opt6 vs opt5 (+0.4-0.6 / -0.4-3.5),
+  opt7 vs opt6, smc2 (+2.1-5.0), gammalut (-0.1-+1.7), offlut (word-soup
+  +3.6), the whole Round-5 A/B table (largest drift 0.01-0.4 pp), and the
+  base-vs-opt instruction counts (6-30% fewer, was reported 6-29%).
+* **Shifted, now corrected in the README:** threaded is BETTER than reported
+  (+7.4-9.6 vs opt7 at chunk 16, was +6.9-8.9), likewise smc3 (+7.8-12.6,
+  was +7.2-11.9) - both replaced hot not-taken `.w` branches that the old
+  model undercharged in opt7. The combo measures +10.2-20.3 (was +9.6-20.6,
+  up to +21.7 at chunk 127), opt2_m's parse-heavy edge is 26-29% (was
+  27-29), opt4's chunk-16 spread is +5-8 copy / -3 parse (was +5-9 / -2).
+* **x16 vs opt7** under the consolidated model: plain **+16.5-19.4%**,
+  k=4 **+27.5-35.3%**, k=8 **+28.9-38.2%**.
+* **The chunked gap was stale:** "4-6% behind" was measured against the
+  Round-2 x16; the Round-5 x16 has since gained ~10%, and the honest current
+  gap at k=8 is **6-18% behind on typical corpora** and **57% behind on
+  barely-compressible max-offset** (where the greedy chunk-aligned parse
+  expands the stream past the input size). The format's ratio cost on
+  typical data is ~20-26%.
+
+Lesson recorded: relative claims measured against a moving champion rot -
+every published percentage should name its baseline vintage, and a final
+same-model sweep is the only way to make the report straight.
