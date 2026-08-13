@@ -4,6 +4,9 @@ A Java port of [ZX1](https://github.com/einar-saukas/ZX1) v1.5 by Einar Saukas, 
 byte-identical output to the original C implementation (verified by extensive differential
 testing against the C binaries, including custom offset limits).
 
+**Latest release: [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2)** — the three
+assembled 68000 decompressors are attached to it (298, 300 and 288 bytes).
+
 Additions/differences to the original:
 
 * **custom buffer/backreference sizes** — `jx1 -mN` limits match offsets to N bytes;
@@ -249,6 +252,13 @@ mvn -q compile exec:exec@djx1 -Dargs="[-f] [-mN] input.zx1 [output]"
 ```
 
 See [c/zx1/src](c/zx1/src) for the original source code
+
+## Releases
+
+| | |
+|---|---|
+| [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2) | The ring buffer arrives on the 68000, in two forms and at no cost in context — `jx1_68000_ring.S` (300 B) for any buffer and chunk size, `jx1_68000_ring_mod.S` (288 B) when the chunk divides the buffer. The linear decompressor drops to 298 bytes, +32–36% over the reference port. A partial-register hazard in both ring decoders is fixed — the ABI declares `d0-d5` clobbered, so their *incoming* upper words are caller junk, and two clamps compared them long — and both harnesses now poison those registers before every call, with `run.sh` failing the command on any `BAD`. |
+| [v0.1](https://github.com/odipar/jx1/releases/tag/v0.1) | First release: the Java port with `Jx1`/`Djx1`, custom buffer sizes, the incremental ring buffer and resumable decompression, plus the 68000 decompressor chosen from an 18-variant campaign and validated on real hardware timing. |
 
 ## License
 
