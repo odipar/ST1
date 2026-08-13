@@ -22,15 +22,15 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — a resumable 68000 decompressor ported from the Java
-  `Decompressor` state machine, in a linear and a ring-buffer variant, verified
+  `Decompressor` state machine, in a linear and two ring-buffer variants, verified
   byte-identical against Java-compressed streams under cycle-measured emulation and
   on real 68000 hardware timing (Atari ST)
 
 ## The 68k decompressors
 
-Two files, both ported from the Java `Decompressor` state machine, sharing the
-same parser, the same copy engine and the same 15-byte context. They differ
-only in where the output goes:
+Three files, all ported from the Java `Decompressor` state machine, sharing
+the same parser, the same copy engine and the same 15-byte context. They
+differ in where the output goes, and what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
@@ -38,9 +38,10 @@ only in where the output goes:
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 336 B | 15 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 324 B | 15 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
-Both are verified byte-identical against Java-compressed streams under
+All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
-[68k/test/](68k/test/)), and both resume after at most one chunk of output.
+[68k/test/](68k/test/)), and all three resume after at most one chunk of
+output.
 
 **Decision (2026-08-13): [68k/jx1_68000.S](68k/jx1_68000.S) is the
 project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
@@ -85,14 +86,19 @@ Both entries clobber `d0-d5/a0-a2` and leave `a5` untouched (`jx1_decompress`
 uses but restores `a5`); `d6/d7` and `a3/a4/a6` are never touched. Matches are
 copied from the destination itself — the output buffer is the window, so it
 must hold everything decompressed so far. To decompress into **bounded
-memory**, use the ring-buffer version below.
+memory**, use one of the ring-buffer versions below.
 
-### The ring-buffer version
+### The ring-buffer versions
 
 The Java `Decompressor` streams output through a caller-supplied ring buffer,
-so memory use is bounded by the buffer rather than by the output.
-[jx1_68000_ring.S](68k/jx1_68000_ring.S) is that same feature on the 68000, in
-336 bytes — with **no callback, no extra return code, and no extra context**:
+so memory use is bounded by the buffer rather than by the output. Two files
+carry that to the 68000: [jx1_68000_ring.S](68k/jx1_68000_ring.S) takes any
+buffer and chunk size, and
+[jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is smaller and faster when
+the chunk divides the buffer (below). Both share everything else, so read
+this section for both.
+
+Neither needs a callback, an extra return code, or extra context:
 `jx1_resume` still returns just 0 (done) and 1 (more), and the context is the
 same 15-byte block as the linear version.
 
@@ -166,12 +172,17 @@ no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
 **324 bytes (12 less), and 1.5–3.4% faster at chunk 16** — the ring overhead
-over the linear decompressor falls from +13–19% to +9–15%. Every call also
-emits exactly X bytes and returns 1, except the final one, which returns 0
-with the last `output mod X` bytes, so a caller wanting fixed-size blocks
-gets them for free. Feeding it a chunk that does not divide the buffer runs
-the destination past the end, so use `jx1_68000_ring.S` when the caller
-cannot promise the ratio.
+over the linear decompressor falls from +13–19% to +9–15%. On the Atari ST
+the same comparison measures **+1.8–3.7%**, agreeing with the model within
+the ±1 tick resolution, so the gain is confirmed on hardware and not only
+predicted.
+
+Every call also emits exactly X bytes and returns 1, except the final one,
+which returns 0 with the last `output mod X` bytes, so a caller wanting
+fixed-size blocks gets them for free — a property the ST harness checks on
+every call, across 42 configurations. Feeding it a chunk that does not divide
+the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
+the caller cannot promise the ratio.
 
 Validated on real 68000 hardware timing alongside the linear version (see
 [68k/test/](68k/test/)): every corpus byte-checked as it is drained through
