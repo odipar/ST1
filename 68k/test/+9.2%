@@ -31,27 +31,6 @@ headless with console output on stdout.
 > `+o3`. With the flag both assemblers emit byte-identical 324-byte output —
 > without it, rmac's is 326.
 
-## The corpora
-
-Seven cases, the same ones (and the same RNG stream) the emulator rig uses.
-Each is embedded twice: compressed normally, and compressed with `-m256` so
-every offset fits the smallest ring the harness tests.
-
-| corpus | output | stream | stream (`-m256`) | what it exercises |
-|---|---|---|---|---|
-| text | 360 | 28 | 28 | short gammas, literals and matches mixed |
-| wordsoup | 2925 | 818 | 1203 | parse-heavy: many short ops |
-| farmatch | 2900 | 212 | 410 | two-byte offsets |
-| period129 | 1032 | 138 | 138 | the one/two-byte offset boundary |
-| allsame | 1000 | 6 | 6 | one long match |
-| rle32k | 32000 | 7 | 7 | ops near the 32K `dbf`/word limit |
-| maxoffset | 33012 | 32589 | 33121 | offsets up to 32512; barely compressible |
-
-"output" is the decompressed size — what the decompressor produces and what
-the cycle counts below are spent on. Note `maxoffset` at `-m256` *expands*
-(33121 > 33012): a 256-byte window on random data is nearly all literals,
-which is exactly the ratio cost of a small ring.
-
 ## What it checks that emulation cannot
 
 Each corpus is decompressed one-shot, resumed at chunk 16, 127 and 1, and then
@@ -68,9 +47,7 @@ sizes × 2 chunk sizes), every byte checked against the expected image.
 
 The harness reports raw ticks plus a calibration loop of exactly known cycle
 count, so the host can convert without assuming anything about the clock. A
-200 Hz tick is 5 ms; at the ST's 8 MHz that is 40000 cycles. Cycles are per
-full decode of one corpus: "stream" bytes in, "output" bytes out, at chunk
-size X.
+200 Hz tick is 5 ms; at the ST's 8 MHz that is 40000 cycles.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
@@ -89,10 +66,8 @@ size X.
 | maxoffset | 32589 | 33012 | 16 | 1160802 | 1266667 | +9.1% |
 | maxoffset | 32589 | 33012 | 127 | 552446 | 580000 | +5.0% |
 
-The ring decompressor, measured the same way through a 1024-byte ring at
-chunk 16 — every corpus except `text`, `allsame` and `period129` being
-several times the buffer it streams through — lands in the same band,
-**+8.0% to +9.2%** over its model (mean +8.6%):
+The ring decompressor, measured the same way at ring 1024 / chunk 16, lands
+in the same band — **+8.0% to +9.2%** over its model (mean +8.6%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
