@@ -22,8 +22,9 @@ Additions/differences to the original:
   with `-ea` for descriptive errors; without it the checks vanish, like the z80/68k
   decompressors
 * **68k target vs z80 target** — a resumable 68000 decompressor ported from the Java
-  `Decompressor` state machine, verified byte-identical against Java-compressed streams
-  under cycle-measured emulation and on real 68000 hardware timing (Atari ST)
+  `Decompressor` state machine, in a linear and a ring-buffer variant, verified
+  byte-identical against Java-compressed streams under cycle-measured emulation and
+  on real 68000 hardware timing (Atari ST)
 
 ## The 68k decompressor
 
@@ -71,8 +72,49 @@ it runs the whole stream and returns with `a1` at the end of the output.
 Both entries clobber `d0-d5/a0-a2` and leave `a5` untouched (`jx1_decompress`
 uses but restores `a5`); `d6/d7` and `a3/a4/a6` are never touched. Matches are
 copied from the destination itself — the output buffer is the window, so it
-must hold everything decompressed so far; there is no separate ring buffer on
-the 68k side (the Java `Decompressor` is the one that offers that).
+must hold everything decompressed so far. To decompress into **bounded
+memory**, use the ring-buffer variants below.
+
+## Ring-buffer variant
+
+The Java `Decompressor` streams output through a caller-supplied ring buffer,
+so memory use is bounded by the buffer rather than by the output. This is that
+same feature on the 68000, and it carries it without a callback: the
+buffer-full event ("flip") is reported in `jx1_resume`'s return value.
+
+[jx1_68000_ring.S](68k/jx1_68000_ring.S) is 350 bytes with a 23-byte context,
+takes any buffer size N and any chunk size 1..127, and costs 10–22% over the
+linear decompressor — the price of bounded memory.
+
+`jx1_init` takes the ring in a1 and its size N in d1.l; `jx1_resume` (slot
+base+4 — there is no one-shot, since a bounded buffer has to be drained)
+returns:
+
+* **0** — done. The bytes written since your last drain are `[last drain, a1)`
+* **1** — more output, chunk budget spent
+* **2** — more output, **and the buffer wrapped**: everything up to the end of
+  the buffer is valid and must be consumed now, because the next call starts
+  writing at the buffer's first byte again (Java: `flip(buffer, length)`)
+
+```
+        lea     stream,a0
+        lea     ring,a1                 ; N bytes; no alignment requirement
+        moveq   #16,d0                  ; chunk size X
+        move.l  #4096,d1                ; ring size N
+        lea     context,a5              ; 24 bytes, word-aligned
+        bsr     jx1_init
+.chunk:
+        bsr     jx1_resume
+        ; consume [drained, a1) — or [drained, ring+N) when d0 = 2
+        tst.w   d0
+        bne.s   .chunk
+```
+
+A buffer of N bytes supports back-references up to exactly N, so compress with
+`-mN`. Rather than testing for a wrap per byte, each copy pass takes
+`n = min(remaining, budget, end−dst, end−src)` and runs the same rolled-out
+ladder as the linear version, wrapping the pointers between segments: a ring
+costs a clamp per segment, not a test per byte.
 
 ## Retired exploration
 
