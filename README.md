@@ -149,9 +149,16 @@ the destination can never reach the buffer end *inside* a call — only exactly
 as the budget runs out — which is why no copy needs a destination bounds test
 and the buffer is wrapped once, at the next entry. A match source that runs
 into the buffer end still splits the copy into segments, so the rolled-out
-ladder itself never needs a bounds test. Note that a call near the end of the
-buffer produces fewer than X bytes: use the write pointer, not an assumed
-chunk size.
+ladder itself never needs a bounds test.
+
+A call that runs into the end of the buffer therefore produces fewer than X
+bytes, so in general use the write pointer rather than an assumed chunk size.
+**Making N a multiple of X removes that case**: `dst − start` is then a
+multiple of X at every entry, so the room is too and the clamp never bites —
+every call emits exactly X bytes and returns 1, except the final one, which
+returns 0 with the last `output mod X` bytes (a full chunk when the output
+divides evenly). Callers wanting fixed-size blocks should size the buffer
+that way.
 
 Validated on real 68000 hardware timing alongside the linear version (see
 [68k/test/](68k/test/)): every corpus byte-checked as it is drained through
