@@ -95,7 +95,9 @@
 ;   3. THE CHUNK SIZE DIVIDES THE RING BUFFER SIZE. Everything above rests on
 ;      it; a chunk that does not divide the buffer WILL run the destination
 ;      past the end of it
-;   4. no back-reference offset exceeds the ring buffer size N
+;   4. the ring buffer size N is 1..65535. The format's offsets stop at
+;      32512, so a larger ring could never be referenced anyway
+;   5. no back-reference offset exceeds the ring buffer size N
 ;
 ; The context must be word-aligned and is 16 bytes.
 ;
@@ -200,7 +202,7 @@ budget_fits:
 source_ready:
         move.l  a4,d1
         sub.l   a2,d1                   ; room before the source wraps (>= 1)
-        cmp.l   d0,d1
+        cmp.w   d0,d1                   ; word, as above: the room is at most N
         bcc.s   copy
         move.w  d1,d0                   ; this segment stops at the wrap
         bra.s   copy

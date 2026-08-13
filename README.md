@@ -133,11 +133,11 @@ pointer never wraps *during* a call, so a full buffer simply shows up as
 
 Decoding the same stream, the ring costs this much over the linear version:
 
-| chunk X | N = 1024 | N = 4096 | N = 65536 |
+| chunk X | N = 1024 | N = 4096 | N = 32512 |
 |---|---|---|---|
-| 16 | +8.1…15.9% | +7.9…15.3% | +8.0…15.1% |
-| 64 | +4.2…12.8% | +3.9…12.0% | +3.8…12.0% |
-| 127 | +4.2…12.4% | +3.0…11.6% | +2.5…11.6% |
+| 16 | +7.7…15.1% | +7.5…14.5% | +7.6…14.4% |
+| 64 | +4.0…12.4% | +3.8…11.6% | +3.7…11.6% |
+| 127 | +4.0…12.0% | +2.9…11.2% | +2.4…11.2% |
 
 (ranges across the six benchmark corpora, 360 to 33012 bytes of output from
 6- to 32589-byte streams; per-corpus sizes and figures are in
@@ -146,13 +146,14 @@ Decoding the same stream, the ring costs this much over the linear version:
 The ring's work is **per call and per match segment, never per byte** — one
 clamp at entry, plus a source recompute and clamp for each match — so the
 overhead is set by the chunk size that amortizes it and is essentially
-independent of N (the three rows above move by less than 0.5 points across
-1024-, 4096- and 65536-byte rings). Larger chunks are close to free; a
+independent of N (the three rows above move by less than 0.7 points across
+1024-, 4096- and 32512-byte rings). Larger chunks are close to free; a
 16-byte chunk pays the entry clamp every 16 bytes. A small ring also costs
 compression ratio, since offsets are capped at N.
 
 A buffer of N bytes supports back-references up to exactly N, so compress with
-`-mN`. The entry clamps the call's budget to the room left in the buffer, so
+`-mN`. N may be 1..65535; the format's offsets stop at 32512, so a larger ring
+could never be referenced anyway. The entry clamps the call's budget to the room left in the buffer, so
 the destination can never reach the buffer end *inside* a call — only exactly
 as the budget runs out — which is why no copy needs a destination bounds test
 and the buffer is wrapped once, at the next entry. A match source that runs

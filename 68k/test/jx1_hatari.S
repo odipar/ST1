@@ -151,24 +151,46 @@ t_resume:
         bsr     putdec
         lea     m_eq,a0
         bsr     puts
-        bsr     run_resume
+        bsr     run_resume_poison
         move.l  ctx+8,d0                        ; ctx_dst = current output end
         sub.l   #dst_buf,d0
         lea     dst_buf,a0
         bra     verify
 
-; run_resume: chunk in d7.b. Leaves the context at `ctx` fully written back.
+; run_resume: chunk in d7.b, no poisoning - the timing path, so a measurement
+; is the decompressor alone. Leaves the context at `ctx` fully written back.
 run_resume:
-        lea     ctx,a5
-        movea.l CASE_SRC(a6),a0
-        lea     dst_buf,a1
-        move.l  d7,d0
-        bsr     jx1_init
+        bsr     resume_setup
 .loop:
         bsr     jx1_resume
         tst.w   d0
         bne.s   .loop
         rts
+
+; run_resume_poison: the same, but fills the caller-clobbered registers with
+; junk before every call. The ABI calls d0-d5 clobbered, which promises nothing
+; about their incoming values, so this is what a legal caller may look like -
+; and reading their upper words is a bug the verification path must catch.
+run_resume_poison:
+        bsr     resume_setup
+.loop:
+        move.l  #$BEEF0000,d0
+        move.l  d0,d1
+        move.l  d0,d2
+        move.l  d0,d3
+        move.l  d0,d4
+        move.l  d0,d5
+        bsr     jx1_resume
+        tst.w   d0
+        bne.s   .loop
+        rts
+
+resume_setup:
+        lea     ctx,a5
+        movea.l CASE_SRC(a6),a0
+        lea     dst_buf,a1
+        move.l  d7,d0
+        bra     jx1_init                        ; tail call: its rts returns
 
 ; -----------------------------------------------------------------------------
 ; verify: a0 = produced buffer, d0 = produced length; compares against the
@@ -245,7 +267,7 @@ m_t:        dc.b    "T ",0
 save_ssp:   ds.l    1
 iters:      ds.l    1
         even
-ctx:        ds.b    16                          ; jx1 context (15 bytes + pad)
+ctx:        ds.b    16                          ; jx1 context
         even
 dst_buf:    ds.b    40000                       ; largest expected output + odd
         even

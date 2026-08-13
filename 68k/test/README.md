@@ -55,6 +55,12 @@ the cycle counts below are spent on. Note `maxoffset` at `-m256` *expands*
 (33121 > 33012): a 256-byte window on random data is nearly all literals,
 which is exactly the ratio cost of a small ring.
 
+Both harnesses fill **d0-d5 with junk before every `jx1_resume`**. The ABI
+calls those registers clobbered, which promises nothing about their incoming
+values, so this is what a legal caller may look like — and a decoder that
+reads their upper words is broken. That check is what a partial-register bug
+in both ring decoders escaped for want of, until an external audit found it.
+
 ## What it checks that emulation cannot
 
 Each corpus is decompressed one-shot, resumed at chunk 16, 127 and 1, and then
@@ -132,32 +138,32 @@ size X.
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
 several times the buffer it streams through — lands in the same band,
-**+8.0% to +9.2%** over its model (mean +8.6%):
+**+8.7% to +10.3%** over its model (mean +9.5%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16590 | 18200 | +9.7% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 268692 | 290667 | +8.2% |
-| farmatch | 410 | 2900 | 1024 | 16 | 111338 | 121333 | +9.0% |
-| period129 | 138 | 1032 | 1024 | 16 | 40942 | 44600 | +8.9% |
-| allsame | 6 | 1000 | 1024 | 16 | 39152 | 42600 | +8.8% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1224626 | 1326667 | +8.3% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1202444 | 1313333 | +9.2% |
+| text | 28 | 360 | 1024 | 16 | 16494 | 18200 | +10.3% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 267470 | 290667 | +8.7% |
+| farmatch | 410 | 2900 | 1024 | 16 | 110656 | 121333 | +9.6% |
+| period129 | 138 | 1032 | 1024 | 16 | 40696 | 44600 | +9.6% |
+| allsame | 6 | 1000 | 1024 | 16 | 38900 | 42600 | +9.5% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1216564 | 1326667 | +9.1% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1198166 | 1313333 | +9.6% |
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
 spends that on a cheaper entry, measured on the same shape:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 17388 | 19000 | +9.3% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 277538 | 298667 | +7.6% |
-| farmatch | 410 | 2900 | 1024 | 16 | 118062 | 128000 | +8.4% |
-| period129 | 138 | 1032 | 1024 | 16 | 43298 | 47000 | +8.6% |
-| allsame | 6 | 1000 | 1024 | 16 | 41356 | 45000 | +8.8% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1296252 | 1400000 | +8.0% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1297658 | 1413333 | +8.9% |
+| text | 28 | 360 | 1024 | 16 | 16034 | 17600 | +9.8% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 263786 | 286667 | +8.7% |
+| farmatch | 410 | 2900 | 1024 | 16 | 106992 | 116667 | +9.0% |
+| period129 | 138 | 1032 | 1024 | 16 | 39384 | 43000 | +9.2% |
+| allsame | 6 | 1000 | 1024 | 16 | 37640 | 41200 | +9.5% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1176192 | 1280000 | +8.8% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1156502 | 1260000 | +8.9% |
 
-Same band (+7.6% to +9.3%, mean +8.5%), and the two tables also **confirm the
+Same band (+8.7% to +9.8%, mean +9.1%), and the two tables also **confirm the
 optimisation on hardware independently of the model**: at identical corpora,
 ring and chunk, the measured ticks fall from 195/228/199/243/232/218/220 to
 190/224/192/235/225/210/212, a gain of **+1.8% to +3.7%** against the +1.5% to
