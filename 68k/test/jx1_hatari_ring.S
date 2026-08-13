@@ -34,6 +34,7 @@ CASE_SIZE   equ     24
 
 CALIB_OUTER equ     12              ; x 655386 cycles = 7.86M
 RING_BIG    equ     1024
+RING_ODD    equ     1000            ; neither a power of two nor a multiple
 RING_SMALL  equ     256             ; must match gendata.py's RING (-mN)
 
         .text
@@ -63,6 +64,9 @@ start:
         moveq   #16,d7
         bsr     verify_ring
         moveq   #127,d7
+        bsr     verify_ring
+        move.l  #RING_ODD,d6
+        moveq   #16,d7
         bsr     verify_ring
         move.l  #RING_BIG,d6
         moveq   #16,d7
@@ -129,6 +133,8 @@ verify_ring:
         bsr     puts
 
         bsr     ring_init
+        clr.w   nshort                          ; short calls seen (before the last)
+        clr.b   sizebad
         move.l  #ring_buf,prev                  ; first undrained byte
         move.l  CASE_EXP(a6),expptr
         move.l  CASE_ELEN(a6),expleft
@@ -139,6 +145,7 @@ verify_ring:
 
         move.l  a1,d0
         sub.l   prev,d0                         ; bytes produced by this call
+        bsr     check_size
         beq.s   .nodata
         cmp.l   expleft,d0
         bhi.s   .bad                            ; more output than expected
@@ -164,11 +171,50 @@ verify_ring:
 
         tst.l   expleft                         ; every expected byte accounted
         bne.s   .bad                            ; for?
-        lea     m_ok,a0
+        tst.b   sizebad
+        bne.s   .bad
+        tst.w   nshort                           ; report which regime was seen:
+        bne.s   .var                             ; every call a full chunk, or
+        lea     m_okf,a0                         ; short ones at the wrap
+        bra     puts
+.var:
+        lea     m_okv,a0
         bra     puts
 .bad:
         lea     m_bad,a0
         bra     puts
+
+; -----------------------------------------------------------------------------
+; check_size: d0 = bytes produced by the call just made. Checks the documented
+; per-call contract on hardware: a call that returns 1 produces exactly the
+; chunk size, unless it ran into the end of the buffer - which can only happen
+; when the chunk does not divide the buffer. Sets sizebad if that is violated
+; and counts the short calls. Preserves d0 (and the flags it sets on it).
+; -----------------------------------------------------------------------------
+check_size:
+        movem.l d0-d2/a0,-(sp)
+        tst.w   retcode
+        beq.s   .done                           ; the final call may be short
+        cmp.l   d7,d0
+        bhi.s   .bad                            ; never more than one chunk
+        beq.s   .done                           ; a full chunk is always fine
+        tst.l   d0
+        beq.s   .bad                            ; ...and never nothing
+        addq.w  #1,nshort
+        movea.l curdst,a0                       ; a short call must sit exactly
+        cmpa.l  a4,a0                           ; at the end of the buffer
+        bne.s   .bad
+        move.l  d6,d1                           ; ...and must not be possible at
+        divu.w  d7,d1                           ; all when the chunk divides the
+        swap    d1                              ; buffer
+        tst.w   d1
+        bne.s   .done
+.bad:
+        st      sizebad
+.done:
+        movem.l (sp)+,d0-d2/a0
+        tst.l   d0                              ; restore the caller's flags
+        rts
 
 ; ring_init: a6 = case, d6.l = ring size, d7.w = chunk. Leaves a3/a4 as the
 ; ring bounds (the decompressor never modifies them) and a5 = context.
@@ -232,7 +278,8 @@ m_calib:    dc.b    "CALIB ",0
 m_done:     dc.b    "DONE",13,10,0
 m_sp:       dc.b    " ",0
 m_slash:    dc.b    "/",0
-m_ok:       dc.b    "OK ",0
+m_okf:      dc.b    "OKf ",0                        ; every call a full chunk
+m_okv:      dc.b    "OKv ",0                        ; short calls at the wrap
 m_bad:      dc.b    "BAD ",0
 m_r:        dc.b    "R",0
 m_eq:       dc.b    "=",0
@@ -250,6 +297,8 @@ curdst:     ds.l    1
 expptr:     ds.l    1
 expleft:    ds.l    1
 retcode:    ds.w    1
+nshort:     ds.w    1
+sizebad:    ds.b    1
         even
 ctx:        ds.b    16                          ; jx1 context (15 bytes + pad)
         even
