@@ -18,7 +18,7 @@
 ;   1. no single literal run or match is longer than 32768 bytes
 ;   2. the chunk size is 1..127
 ;
-; The context must be word-aligned and is 15 bytes (16 with padding).
+; The context must be word-aligned and is 16 bytes.
 ;
 ; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
 ; a5 = context untouched; jx1_decompress additionally uses (but restores)
@@ -38,7 +38,6 @@ ctx_bits        equ     14              ; .b  bit buffer
 ctx_state       equ     15              ; .b  State: $80 START, 0 LITERALS,
 ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed, so the
                                         ;     entry dispatches on the load's flags
-ctx_alloc       equ     16              ; ctx_size rounded up to keep sp even
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4/8).
                 bra.w   jx1_init
@@ -68,7 +67,7 @@ jx1_init:
 ; -----------------------------------------------------------------------------
 jx1_decompress:
         move.l  a5,-(sp)
-        lea     -ctx_alloc(sp),sp
+        lea     -ctx_size(sp),sp
         movea.l sp,a5
         moveq   #127,d0                 ; largest chunk a byte allows
         bsr.s   jx1_init
@@ -76,7 +75,7 @@ jx1_decompress:
         bsr.s   jx1_resume              ; Java: while (resume()) {}
         tst.w   d0
         bne.s   .drain
-        lea     ctx_alloc(sp),sp
+        lea     ctx_size(sp),sp
         movea.l (sp)+,a5
         rts
 

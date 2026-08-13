@@ -29,7 +29,7 @@ Additions/differences to the original:
 ## The 68k decompressors
 
 Three files, all ported from the Java `Decompressor` state machine, sharing
-the same parser and the same copy engine. They differ in where the output
+the same parser, the same copy engine and the same 16-byte context. They differ in where the output
 goes, and in what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
@@ -101,7 +101,7 @@ both.
 
 Neither needs a callback, an extra return code, or extra context:
 `jx1_resume` still returns just 0 (done) and 1 (more), and the context is the
-same 15-byte block as the linear version.
+same 16-byte block as the linear version.
 
 `jx1_init` is unchanged except that a1 is the ring buffer. `jx1_resume` (slot
 base+4 — there is no one-shot, since a bounded buffer has to be drained) takes

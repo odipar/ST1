@@ -57,7 +57,7 @@
 ;
 ; 3. THE RING BOUNDS ARE NOT STATE. The caller already holds them - it needs
 ;    them to drain - so it passes them read-only in a3/a4 instead of the
-;    decompressor storing and reloading them. The context is 15 bytes: the
+;    decompressor storing and reloading them. The context is 16 bytes: the
 ;    ring costs none.
 ;
 ; A match source running into the end of the buffer still splits a copy into
@@ -97,7 +97,7 @@
 ;      past the end of it
 ;   4. no back-reference offset exceeds the ring buffer size N
 ;
-; The context must be word-aligned and is 15 bytes (16 with padding).
+; The context must be word-aligned and is 16 bytes.
 ;
 ; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
 ; a5 = context and the ring bounds a3/a4 untouched. (d4 carries the op
@@ -115,7 +115,7 @@ ctx_chunk       equ     12              ; .w  chunkSize (X), 1..32767 (a word: t
 ctx_bits        equ     14              ; .b  bit buffer
 ctx_state       equ     15              ; .b  State: $80 START, 0 LITERALS,
 ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed so the
-ctx_alloc       equ     16              ;     entry dispatches on the load's flags
+                                        ;     entry dispatches on the load's flags
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
 ; There is no one-shot entry: a bounded buffer has to be drained by the
