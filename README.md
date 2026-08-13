@@ -95,8 +95,9 @@ so memory use is bounded by the buffer rather than by the output. Two files
 carry that to the 68000: [jx1_68000_ring.S](68k/jx1_68000_ring.S) takes any
 buffer and chunk size, and
 [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is smaller and faster when
-the chunk divides the buffer (below). Both share everything else, so read
-this section for both.
+the chunk divides the buffer (below). They share everything else — the same
+parser, copy engine, entry work and interface — so read this section for
+both.
 
 Neither needs a callback, an extra return code, or extra context:
 `jx1_resume` still returns just 0 (done) and 1 (more), and the context is the
@@ -171,14 +172,17 @@ whole number of chunks and never fewer than one. The budget therefore needs
 no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
-**326 bytes, and 1.5–3.4% faster than the general ring**, which is the cost
-of that ring's room arithmetic. Every call also emits exactly X bytes and
-returns 1, except the final one, which returns 0 with the last
-`output mod X` bytes, so a caller wanting fixed-size blocks gets them for
-free — a property the ST harness checks on every call, across 42
-configurations. Feeding it a chunk that does not divide the buffer runs the
-destination past the end, so use `jx1_68000_ring.S` when the caller cannot
-promise the ratio.
+**326 bytes, and 1.5–3.4% faster than the general ring** — measured at
++1.8–4.1% on the Atari ST. Both files carry the same entry work otherwise,
+so that difference is the price of the general ring's room arithmetic and
+nothing else.
+
+Every call also emits exactly X bytes and returns 1, except the final one,
+which returns 0 with the last `output mod X` bytes, so a caller wanting
+fixed-size blocks gets them for free — a property the ST harness checks on
+every call, across 42 configurations. Feeding it a chunk that does not divide
+the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
+the caller cannot promise the ratio.
 
 ### Testing them
 
