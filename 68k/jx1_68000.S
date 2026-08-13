@@ -50,14 +50,12 @@ ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed, so the
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------
 jx1_init:
-        move.l  a0,ctx_src(a5)
-        move.l  a1,ctx_dst(a5)
-        move.w  d0,ctx_chunk(a5)
-        moveq   #1,d1
-        swap    d1                      ; lastOffset = INITIAL_OFFSET, remaining = 0
-        move.l  d1,ctx_packed(a5)
-        move.b  #$80,ctx_bits(a5)       ; empty bit buffer (sentinel only)
-        move.b  #$80,ctx_state(a5)      ; State.START
+        moveq   #1,d3
+        swap    d3                      ; lastOffset = INITIAL_OFFSET, remaining = 0
+        swap    d0                      ; the last longword is the chunk word,
+        move.w  #$8080,d0               ; an empty bit buffer and State.START,
+        movea.l d0,a2                   ; so the whole context is four registers
+        movem.l d3/a0-a2,(a5)           ; in movem order and one store
         rts
 
 ; -----------------------------------------------------------------------------
@@ -187,21 +185,20 @@ copied:
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
         moveq   #2,d4                   ; State.MATCH
-        moveq   #0,d3                   ; old offset and remaining are both dead here
-        move.b  (a0)+,d3
+        move.b  (a0)+,d3                ; d3.w is already zero: every edge here
+                                        ; has just completed an op, and the
+                                        ; stale high word is overwritten by the
+                                        ; swap/move.w pair at got_offset
         lsr.b   #1,d3                   ; carry = low bit selects the two-byte form
         bcs.s   two_byte
         neg.w   d3                      ; offset = 128 - value/2
         add.w   #128,d3
         bra.s   got_offset
 two_byte:
-        add.b   d3,d3                   ; low & 254
         moveq   #0,d0
         move.b  (a0)+,d0
-        lsr.b   #1,d0                   ; d0 = high >> 1, carry = high & 1
-        bcc.s   no_carry
-        addq.w  #1,d3
-no_carry:
+        lsr.b   #1,d0                   ; d0 = high >> 1, X = high & 1
+        addx.w  d3,d3                   ; (low & 254) + (high & 1) in one go
         lsl.w   #8,d0
         add.w   d0,d3                   ; (high>>1)*256 + (low&254) + (high&1)
         neg.w   d3
@@ -233,8 +230,7 @@ suspend:                                ; Java: resume() returning true
         rts
 
 end_marker:                             ; Java: State.DONE (no final flip needed:
-        moveq   #-1,d0                  ; output is already in place)
-        move.b  d0,(a5)                 ; State.DONE
+        st      (a5)                    ; State.DONE (output is already in place)
         move.b  d2,-(a5)
         subq.l  #2,a5
         movem.l d3/a0-a1,-(a5)

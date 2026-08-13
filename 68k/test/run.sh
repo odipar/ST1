@@ -12,8 +12,9 @@ cd "$(dirname "$0")"
 HATARI=${HATARI:-hatari}
 TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 
-# +o3 folds 0(An) to (An); without it rmac emits a 2-byte-larger decompressor
-# (322 instead of 320). With it, rmac and vasm agree byte for byte.
+# +o3 folds 0(An) to (An). No source needs it today, and rmac matches vasm
+# byte for byte without it, but it costs nothing and the next such operand
+# would otherwise cost two bytes silently.
 python3 gendata.py
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S                  # linear
 rmac -m68000 -p +o3 -dRINGMOD=0 -i. -i.. -o JX1RING.PRG jx1_hatari_ring.S  # ring
