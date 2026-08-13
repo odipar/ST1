@@ -109,7 +109,7 @@
 ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
 ctx_src         equ     4               ; .l  a0: input position
 ctx_dst         equ     8               ; .l  a1: write position (Java: bufferIndex)
-ctx_chunk       equ     12              ; .w  chunkSize (X), 1..32767 (a word: the
+ctx_chunk       equ     12              ; .w  chunkSize (X), 1..127 (a word: the
                                         ;     budget is only ever used word-wide,
                                         ;     so the entry loads it as one)
 ctx_bits        equ     14              ; .b  bit buffer
@@ -124,7 +124,7 @@ ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed so the
                 bra.w   jx1_resume
 
 ; -----------------------------------------------------------------------------
-; jx1_init: a0 = compressed data, a1 = ring buffer, d0.b = chunk size 1..127,
+; jx1_init: a0 = compressed data, a1 = ring buffer, d0.w = chunk size 1..127,
 ;           a5 = word-aligned context block of ctx_size bytes.
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------

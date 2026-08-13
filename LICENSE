@@ -13,11 +13,12 @@ section of c/zx1/README.md):
    code and/or incorporate the compressor within your own products; if you
    just execute it to compress files, you can simply ignore these conditions.
 
-2. THE DECOMPRESSORS - the Java Decompressor/Djx1, the 68000 decompressor
-   68k/jx1_68000.S, and the retired decompressor variants - can be used
-   freely within your own programs (for any platform), even for commercial
-   releases. The only condition is that you must indicate somehow in your
-   documentation that you have used ZX1/jx1.
+2. THE DECOMPRESSORS - the Java Decompressor/Djx1, the 68000 decompressors
+   in 68k/ (jx1_68000.S, jx1_68000_ring.S, jx1_68000_ring_mod.S), and the
+   retired decompressor variants - can be used freely within your own
+   programs (for any platform), even for commercial releases. The only
+   condition is that you must indicate somehow in your documentation that
+   you have used ZX1/jx1.
 
 Attribution
 -----------
