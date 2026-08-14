@@ -107,8 +107,8 @@
 ; Assumptions, undefined when violated:
 ;
 ;   1. no single literal run or match is longer than 65535 bytes - the
-;      length lives in a word. Compress with jx1 -l65535 to guarantee it;
-;      an unconstrained stream can exceed it and would decode short here
+;      length lives in a word. Compress with jx1 -l65535, which splits any
+;      longer match; a plain stream can exceed it and would decode short here
 ;   2. the chunk size is 1..127
 ;   3. THE CHUNK SIZE DIVIDES THE RING BUFFER SIZE. Everything above rests on
 ;      it; a chunk that does not divide the buffer WILL run the destination
