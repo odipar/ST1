@@ -57,10 +57,9 @@ for f in FILES:
 for f in FILES:
     src = (K68 / f).read_text()
     check('move.w  #$8080,d0' in src, f'{f}: init packs bits+START as $8080')
-    # the linear version keeps the write pointer in the context (a1); the rings
-    # hand it to the caller, so their movem is one register shorter
-    movem = 'movem.l d3/a0-a2,(a5)' if f == 'jx1_68000.S' else 'movem.l d3/a0/a2,(a5)'
-    check(movem in src, f'{f}: init stores the context in one movem')
+    # all three hand the write pointer to the caller, so all three store the
+    # same three registers - and the same 12-byte context
+    check('movem.l d3/a0/a2,(a5)' in src, f'{f}: init stores the context in one movem')
     check('bmi.s   entry_special' in src, f'{f}: entry dispatches on the sign')
     check('moveq   #0,d4' in src, f'{f}: LITERALS = 0')
     check('st      (a5)' in src, f'{f}: DONE stored with st')
@@ -135,8 +134,8 @@ check(all(n in sizes.values() for n in prose),
 ctx_prose = [int(n) for n in re.findall(r'(\d+)-byte word-aligned context', readme)]
 check(all(n in ctxsize.values() for n in ctx_prose),
       f'README prose quotes contexts {ctx_prose}, actual {sorted(set(ctxsize.values()))}')
-check('the same 16-byte context' not in readme,
-      'README does not claim all three share one context size')
+check(len(set(ctxsize.values())) == 1,
+      f'all three decompressors have the same context size: {ctxsize}')
 
 # 13. the operation-length contract, stated identically in all three headers and
 #     backed by 68k/test/emu/boundaries.py

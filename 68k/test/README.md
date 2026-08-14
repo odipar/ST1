@@ -129,20 +129,20 @@ size X.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
-| text | 28 | 360 | 16 | 15134 | 15900 | +5.1% |
-| text | 28 | 360 | 127 | 8190 | 8700 | +6.2% |
-| wordsoup | 818 | 2925 | 16 | 219046 | 229333 | +4.7% |
-| wordsoup | 818 | 2925 | 127 | 167228 | 177333 | +6.0% |
-| farmatch | 212 | 2900 | 16 | 103264 | 106667 | +3.3% |
-| farmatch | 212 | 2900 | 127 | 47938 | 49333 | +2.9% |
-| period129 | 138 | 1032 | 16 | 37860 | 39400 | +4.1% |
-| period129 | 138 | 1032 | 127 | 18434 | 19200 | +4.2% |
-| allsame | 6 | 1000 | 16 | 35982 | 37400 | +3.9% |
-| allsame | 6 | 1000 | 127 | 16782 | 17400 | +3.7% |
-| rle32k | 7 | 32000 | 16 | 1120972 | 1160000 | +3.5% |
-| rle32k | 7 | 32000 | 127 | 510478 | 526667 | +3.2% |
-| maxoffset | 32589 | 33012 | 16 | 1151056 | 1193333 | +3.7% |
-| maxoffset | 32589 | 33012 | 127 | 549956 | 566667 | +3.0% |
+| text | 28 | 360 | 16 | 14766 | 15500 | +5.0% |
+| text | 28 | 360 | 127 | 8142 | 8600 | +5.6% |
+| wordsoup | 818 | 2925 | 16 | 216118 | 226667 | +4.9% |
+| wordsoup | 818 | 2925 | 127 | 166844 | 176000 | +5.5% |
+| farmatch | 212 | 2900 | 16 | 100352 | 104000 | +3.6% |
+| farmatch | 212 | 2900 | 127 | 47570 | 49333 | +3.7% |
+| period129 | 138 | 1032 | 16 | 36820 | 38200 | +3.7% |
+| period129 | 138 | 1032 | 127 | 18290 | 19200 | +5.0% |
+| allsame | 6 | 1000 | 16 | 34974 | 36200 | +3.5% |
+| allsame | 6 | 1000 | 127 | 16654 | 17400 | +4.5% |
+| rle32k | 7 | 32000 | 16 | 1088972 | 1126667 | +3.5% |
+| rle32k | 7 | 32000 | 127 | 506446 | 520000 | +2.7% |
+| maxoffset | 32589 | 33012 | 16 | 1118032 | 1160000 | +3.8% |
+| maxoffset | 32589 | 33012 | 127 | 545796 | 566667 | +3.8% |
 
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
@@ -209,14 +209,22 @@ calibration:
 
 About **1% on the resumable path** — several rows sit inside the ±1 tick
 resolution — for a change set whose real return was 8–10 bytes each and a
-correctness fix. The exception is `jx1_decompress`, which no longer hands
+correctness fix.
+
+The linear decompressor then took the same write-pointer change the rings
+already had, bringing its context to 12 bytes and making all three the same
+size. A load and a store leave the per-call path, which at chunk 16 is worth
+**+1.2% to +3.2%** (mean +2.6%): ticks 159/172/160/197/187/174/179 become
+155/170/156/191/181/169/174. At chunk 127 there are eight times fewer calls
+to save them on, and the gain falls into the measurement floor (+0.0% to
++1.3%). The exception is `jx1_decompress`, which no longer hands
 control back 251 times it never needed to: its private budget is now 65535
 rather than 127, the same two bytes, worth **+4.2% to +16.3%** (mean +12.4%)
 under the model. The resumable entry is unchanged, so the timed rows above do
 not show it.
 
-**The model holds.** Real ST decode time runs **+2.9% to +6.2%** above the
-idealized 68000 cycle counts (mean +4.1%) — the gap is interrupt service and
+**The model holds.** Real ST decode time runs **+2.7% to +5.6%** above the
+idealized 68000 cycle counts (mean +4.2%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
 reference `dbf` loop, whose cycle count is exact by construction, measures
 **+22.6%** over its ideal on the same machine, and a `move.b (a0)+,(a1)+` loop
