@@ -28,8 +28,27 @@ public final class Optimizer {
 
     /** Returns the last block of the optimal parse chain for {@code input}. */
     public static Block optimize(byte[] input, int skip, int offsetLimit) {
+        return optimize(input, skip, offsetLimit, Integer.MAX_VALUE);
+    }
+
+    /**
+     * As {@link #optimize(byte[], int, int)}, but no single literal run or match
+     * may exceed {@code maxOpLength} bytes.
+     *
+     * <p>The 68000 decoders hold an operation's remaining length in a word, so a
+     * stream containing a longer operation decodes to the wrong length on them
+     * while remaining perfectly valid here. Passing 65535 confines the parse to
+     * what they can represent. The constraint is applied inside the search, so
+     * the result is still the optimal parse <em>subject to</em> the limit, not a
+     * post-hoc split of an unconstrained one.
+     *
+     * @throws IllegalArgumentException if no parse satisfies the limit, which
+     *     happens when the input contains more than {@code maxOpLength}
+     *     consecutive bytes that no match can cover
+     */
+    public static Block optimize(byte[] input, int skip, int offsetLimit, int maxOpLength) {
         int maxOffset = offsetCeiling(input.length - 1, offsetLimit);
-        var lastLiteral = new @Nullable Block[maxOffset + 1];
+        @Nullable Block[] lastLiteral = new @Nullable Block[maxOffset + 1];
         var lastMatch = new @Nullable Block[maxOffset + 1];
         var optimal = new @Nullable Block[input.length];
         int[] matchLength = new int[maxOffset + 1];
@@ -50,7 +69,7 @@ public final class Optimizer {
                 if (index != skip && index >= offset && input[index] == input[index - offset]) {
                     // Copy from last offset.
                     Block literal = lastLiteral[offset];
-                    if (literal != null) {
+                    if (literal != null && index - literal.index() <= maxOpLength) {
                         int length = index - literal.index();
                         int bits = literal.bits() + 1 + eliasGammaBits(length);
                         Block match = new Block(bits, index, offset, literal);
@@ -58,45 +77,58 @@ public final class Optimizer {
                         optimal[index] = better(optimal[index], match);
                     }
                     // Copy from new offset.
-                    if (++matchLength[offset] > 1) {
-                        if (bestLengthSize < matchLength[offset]) {
+                    int reach = Math.min(++matchLength[offset], maxOpLength);
+                    if (reach > 1) {
+                        if (bestLengthSize < reach) {
                             Block best = optimal[index - bestLength[bestLengthSize]];
-                            assert best != null;
-                            int bits = best.bits() + eliasGammaBits(bestLength[bestLengthSize] - 1);
+                            // Unreachable positions exist only under a length
+                            // limit; without one every predecessor is present,
+                            // as the original asserts stated.
+                            int bits = best == null ? Integer.MAX_VALUE
+                                    : best.bits() + eliasGammaBits(bestLength[bestLengthSize] - 1);
                             do {
                                 bestLengthSize++;
                                 Block shorter = optimal[index - bestLengthSize];
-                                assert shorter != null;
-                                int bits2 = shorter.bits() + eliasGammaBits(bestLengthSize - 1);
-                                if (bits2 <= bits) {
+                                int bits2 = shorter == null ? Integer.MAX_VALUE
+                                        : shorter.bits() + eliasGammaBits(bestLengthSize - 1);
+                                if (shorter != null && bits2 <= bits) {
                                     bestLength[bestLengthSize] = bestLengthSize;
                                     bits = bits2;
                                 } else {
                                     bestLength[bestLengthSize] = bestLength[bestLengthSize - 1];
                                 }
-                            } while (bestLengthSize < matchLength[offset]);
+                            } while (bestLengthSize < reach);
                         }
-                        int length = bestLength[matchLength[offset]];
+                        int length = bestLength[reach];
                         Block previous = optimal[index - length];
-                        assert previous != null;
-                        int bits = previous.bits() + 1 + (offset > 128 ? 16 : 8) + eliasGammaBits(length - 1);
-                        Block match = lastMatch[offset];
-                        if (match == null || match.index() != index || match.bits() > bits) {
-                            match = new Block(bits, index, offset, previous);
-                            lastMatch[offset] = match;
-                            optimal[index] = better(optimal[index], match);
+                        if (previous != null) {
+                            int bits = previous.bits() + 1 + (offset > 128 ? 16 : 8) + eliasGammaBits(length - 1);
+                            Block match = lastMatch[offset];
+                            if (match == null || match.index() != index || match.bits() > bits) {
+                                match = new Block(bits, index, offset, previous);
+                                lastMatch[offset] = match;
+                                optimal[index] = better(optimal[index], match);
+                            }
                         }
                     }
                 } else {
                     // Copy literals.
                     matchLength[offset] = 0;
                     Block match = lastMatch[offset];
-                    if (match != null) {
+                    if (match != null && index - match.index() <= maxOpLength) {
                         int length = index - match.index();
                         int bits = match.bits() + 1 + eliasGammaBits(length) + length * 8;
                         Block literal = new Block(bits, index, 0, match);
                         lastLiteral[offset] = literal;
                         optimal[index] = better(optimal[index], literal);
+                    } else {
+                        // The "copy from last offset" branch above chains a match
+                        // back to lastLiteral[offset] on the strength of this
+                        // assignment: it marks the most recent mismatch, so every
+                        // byte after it is known to match at this offset. Leaving
+                        // a stale block here when the run is too long to encode
+                        // would let a later match span bytes that do not match.
+                        lastLiteral[offset] = null;
                     }
                 }
             }
@@ -112,7 +144,11 @@ public final class Optimizer {
         System.out.println("]");
 
         Block last = optimal[input.length - 1];
-        assert last != null;
+        if (last == null) {
+            throw new IllegalArgumentException(
+                    "No parse exists with operations limited to " + maxOpLength
+                    + " bytes: the input contains a longer stretch that no match covers");
+        }
         return last;
     }
 

@@ -42,6 +42,13 @@ public final class Compressor {
 
         int lastOffset = Optimizer.INITIAL_OFFSET;
         boolean first = true;
+        // The format alternates: a 0 bit means "match at the last offset" only
+        // after a literal run - after a match it means literals. An
+        // unconstrained parse never places two matches back to back at one
+        // offset (it would merge them into a longer, cheaper one), but a parse
+        // constrained by a maximum operation length does exactly that, so the
+        // short encoding has to be earned rather than assumed.
+        boolean afterLiterals = false;
 
         // Generate output.
         for (Block block : blocks) {
@@ -62,11 +69,13 @@ public final class Compressor {
                     writeByte(input[inputIndex]);
                     readBytes(1);
                 }
-            } else if (block.offset() == lastOffset) {
+                afterLiterals = true;
+            } else if (block.offset() == lastOffset && afterLiterals) {
                 // Copy from last offset indicator and length.
                 writeBit(false);
                 writeInterlacedEliasGamma(length);
                 readBytes(length);
+                afterLiterals = false;
             } else {
                 // Copy from new offset indicator.
                 writeBit(true);
@@ -94,6 +103,7 @@ public final class Compressor {
                 readBytes(length);
 
                 lastOffset = offset;
+                afterLiterals = false;
             }
         }
 

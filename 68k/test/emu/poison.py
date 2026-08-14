@@ -48,13 +48,23 @@ def run(data, n, chunk, poison):
     return 'ok' if bytes(out) == data else f'WRONG ({len(out)} of {len(data)} bytes)'
 
 BIN = POS[0] if POS else 'jx1_68000_ring.bin'
-ENTRY = t.CODE + (8 if len(POS) > 1 and POS[1] == 'linear' else 4)
+LINEAR = len(POS) > 1 and POS[1] == 'linear'
+ENTRY = t.CODE + (8 if LINEAR else 4)
+# The loop below drives the ring interface. The linear decoder has no ring - it
+# writes straight ahead - so the only meaningful bound for it is one that holds
+# the whole output; a smaller N would flag ordinary linear output as escaping.
+SIZES = ((65535, 16),) if LINEAR else ((1024, 16), (65535, 16))
+failures = 0
 for name, data, _ in t.testcases():
     if name not in ('word-soup', 'rle-32k'):
         continue
-    for n, chunk in ((1024, 16), (65535, 16)):
+    for n, chunk in SIZES:
         for poison in ([], ['d5'], ['d0'], ['d0','d1','d2','d3','d4','d5']):
             r = run(data, n, chunk, poison)
             tag = 'clean' if not poison else '+'.join(poison)
             flag = '' if r == 'ok' else '   <-- FAILS'
+            failures += r != 'ok'
             print(f'{BIN:12s} {name:10s} N={n:5d} X={chunk:3d} poison={tag:26s} {r}{flag}')
+print(f'{"ALL POISON CASES PASS" if not failures else f"{failures} FAILURES"} '
+      f'- the ABI calls d0-d5 clobbered, so every incoming value is legal')
+sys.exit(1 if failures else 0)

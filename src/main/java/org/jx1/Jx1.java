@@ -13,6 +13,15 @@ public final class Jx1 {
     public static final int MAX_OFFSET_ZX1 = 32512;
     public static final int MAX_OFFSET_ZX7 = 2176;
 
+    /**
+     * The longest operation the 68000 decoders can represent: they hold an
+     * operation's remaining length in a word. A stream containing a longer
+     * literal run or match is still valid here and decodes correctly in Java,
+     * but decodes to the wrong length on a 68000, so {@code -l65535} is what
+     * makes a stream safe for them.
+     */
+    public static final int MAX_OP_68K = 65535;
+
     private Jx1() {}
 
     public static void main(String[] args) {
@@ -22,6 +31,7 @@ public final class Jx1 {
         // Process optional parameters.
         int skip = 0;
         int maxOffset = 0;
+        int maxOpLength = Integer.MAX_VALUE;
         boolean forcedMode = false;
         boolean quickMode = false;
         boolean backwardsMode = false;
@@ -35,6 +45,11 @@ public final class Jx1 {
                     if (args[i].startsWith("-m")) {
                         maxOffset = Cli.parseNumber(args[i].substring(2));
                         if (maxOffset <= 0) {
+                            throw Cli.error("Invalid parameter " + args[i]);
+                        }
+                    } else if (args[i].startsWith("-l")) {
+                        maxOpLength = Cli.parseNumber(args[i].substring(2));
+                        if (maxOpLength <= 0) {
                             throw Cli.error("Invalid parameter " + args[i]);
                         }
                     } else {
@@ -58,11 +73,13 @@ public final class Jx1 {
             outputName = args[i + 1];
         } else {
             Cli.usage("""
-                    Usage: jx1 [-f] [-b] [-q] [-mN] input [output.zx1]
+                    Usage: jx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
                       -f      Force overwrite of output file
                       -b      Compress backwards
                       -q      Quick non-optimal compression
-                      -mN     Limit backreference offsets to N bytes""");
+                      -mN     Limit backreference offsets to N bytes
+                      -lN     Limit any single literal run or match to N bytes
+                              (use -l65535 for the 68000 decoders)""");
             return;
         }
         String inputName = args[i];
@@ -95,8 +112,16 @@ public final class Jx1 {
         }
         int offsetLimit = maxOffset > 0 ? maxOffset
                 : quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
-        Compressor.Result result =
-                Compressor.compress(Optimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode);
+        Block optimal;
+        try {
+            optimal = Optimizer.optimize(input, skip, offsetLimit, maxOpLength);
+        } catch (IllegalArgumentException e) {
+            // -lN can be unsatisfiable: breaking a literal run needs a match to
+            // put in between, and incompressible input may not offer one.
+            throw Cli.error(e.getMessage() + " (raise -l" + maxOpLength
+                    + ", or raise -m" + offsetLimit + " so more matches are available)");
+        }
+        Compressor.Result result = Compressor.compress(optimal, input, skip, backwardsMode);
         byte[] output = result.output();
         if (backwardsMode) {
             reverse(output);

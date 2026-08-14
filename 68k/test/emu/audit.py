@@ -74,16 +74,30 @@ for f in FILES + ['test/jx1_hatari.S', 'test/jx1_hatari_ring.S']:
     check('15 byte' not in src and '15-byte' not in src, f'{f}: no 15-byte wording')
 check('15-byte' not in readme, 'README: no 15-byte wording')
 
-# 7. the ST harness only uses shapes the decoders support
+# 7. the ST harness only uses shapes the decoders support. The two builds have
+#    different contracts, so the two tables are checked against different rules.
 harness = (K68 / 'test' / 'jx1_hatari_ring.S').read_text()
-shapes = [(int(a), int(b)) for a, b in re.findall(r'dc\.l\s+(\w+),(\d+)', harness)
-          if a.isdigit()]
 named = dict(re.findall(r'^(RING_\w+)\s+equ\s+(\d+)', harness, re.M))
-for a, b in re.findall(r'dc\.l\s+(RING_\w+),(\d+)', harness):
-    shapes.append((int(named[a]), int(b)))
-check(all(n <= 65535 for n, _ in shapes), f'ST shapes within N <= 65535: {shapes}')
-mod_shapes = shapes[len([s for s in shapes]) // 2:]
-check(all(n % x == 0 for n, x in shapes if n in (256, 512, 1000, 1016, 1024) and x in (16, 64, 125, 127)) or True, 'shape ratios noted')
+
+
+def parse_shapes(text):
+    return [(int(named.get(a, a)), int(b))
+            for a, b in re.findall(r'dc\.l\s+(\w+),(\d+)', text)]
+
+
+mod_shapes, gen_shapes = [], []
+for m in re.finditer(r'\.if\s+RINGMOD(.*?)\.else(.*?)\.endif', harness, re.S):
+    if 'shapes:' in m.group(1) and 'shapes:' in m.group(2):
+        mod_shapes, gen_shapes = parse_shapes(m.group(1)), parse_shapes(m.group(2))
+        break
+check(bool(mod_shapes) and bool(gen_shapes),
+      f'ST harness declares both shape tables ({len(mod_shapes)}/{len(gen_shapes)})')
+check(all(n % x == 0 for n, x in mod_shapes),
+      f'every ring_mod shape divides: {[s for s in mod_shapes if s[0] % s[1]]}')
+check(any(n % x for n, x in gen_shapes),
+      'the general-ring table exercises at least one non-dividing shape')
+check(all(n <= 65535 for n, _ in mod_shapes + gen_shapes),
+      f'ST shapes within N <= 65535: {mod_shapes + gen_shapes}')
 
 # 8. run.sh fails on BAD, and quotes the right sizes
 runsh = (K68 / 'test' / 'run.sh').read_text()
@@ -99,11 +113,44 @@ for f in ('test/jx1_hatari.S', 'test/jx1_hatari_ring.S'):
 for f in FILES:
     check(f in lic, f'LICENSE names {f}')
 
-# 11. the test README's configuration counts match the harness
+# 11. the test README's configuration counts, computed from the harness rather
+#     than matched as prose
 corpora = len(re.findall(r"^\s+\('", (K68 / 'test' / 'gendata.py').read_text(), re.M))
-gen = harness.split('.else')[1] if '.else' in harness else harness
-check('7 corpora × 5 ring/chunk shapes' in test_readme, 'test README: general-ring count')
-check('42 configurations' in test_readme, 'test README: ring_mod count')
+claim = f'{corpora} corpora × {len(gen_shapes)} ring/chunk shapes'
+check(claim in test_readme, f'test README states the general-ring count ({claim})')
+mod_total = corpora * len(mod_shapes)
+check(f'{mod_total} configurations' in test_readme,
+      f'test README states the ring_mod count ({mod_total} configurations)')
+
+# 12. every size and context size quoted in prose, against the assembled files
+for f in FILES:
+    src = (K68 / f).read_text()
+    quoted = [int(n) for n in re.findall(r'\b(\d{3}) bytes\b', src.split('Assumptions')[0])]
+    check(all(n == sizes[f] for n in quoted),
+          f'{f}: header quotes {quoted}, assembles to {sizes[f]}')
+prose = [int(n) for n in re.findall(r'\*\*(\d{3}) bytes', readme)
+         + re.findall(r'(\d{3}) bytes of position-independent code', readme)]
+check(all(n in sizes.values() for n in prose),
+      f'README prose quotes sizes {prose}, actual {sorted(sizes.values())}')
+ctx_prose = [int(n) for n in re.findall(r'(\d+)-byte word-aligned context', readme)]
+check(all(n in ctxsize.values() for n in ctx_prose),
+      f'README prose quotes contexts {ctx_prose}, actual {sorted(set(ctxsize.values()))}')
+check('the same 16-byte context' not in readme,
+      'README does not claim all three share one context size')
+
+# 13. the operation-length contract, stated identically in all three headers and
+#     backed by 68k/test/emu/boundaries.py
+for f in FILES:
+    src = (K68 / f).read_text()
+    check('longer than 65535 bytes' in src, f'{f}: states the 65535-byte operation limit')
+    check('-l65535' in src, f'{f}: points at the compressor flag that guarantees it')
+check('MAX_OP = 65535' in (K68 / 'test' / 'emu' / 'boundaries.py').read_text(),
+      'boundaries.py pins the same operation limit')
+
+# 14. the trusted-input boundary is stated where a caller will see it
+for f in FILES:
+    check('TRUSTED INPUT ONLY' in (K68 / f).read_text(), f'{f}: states trusted-input-only')
+check('### Trusted input only' in readme, 'README has the trusted-input section')
 
 print(f'PASS {len(ok)}')
 for m in bad:
