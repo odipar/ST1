@@ -46,21 +46,24 @@ for f in FILES:
 for f in FILES:
     src = (K68 / f).read_text()
     check('d0.w = chunk size' not in src, f'{f}: init no longer takes a chunk')
-    check("d5.w = this call's budget" in src, f'{f}: resume documents the budget in d5.w')
-    check('the budget d5.w is 1..65535' in src, f'{f}: the budget range is stated')
+    check("d4.w = this call's budget" in src, f'{f}: resume documents the budget in d5.w')
+    check('the budget in d4.w is 1..65535' in src, f'{f}: the budget range is stated')
 
 # 5. the state encoding the entry dispatch relies on
 for f in FILES:
     src = (K68 / f).read_text()
     # init writes nothing: it just seeds the three registers that are not
     # pointers, and $80 serves as both the empty bit queue and State.START
-    check('moveq   #-128,d2' in src, f'{f}: init seeds the bit queue with $80')
-    check('move.b  d2,d4' in src, f'{f}: init seeds State.START from the same $80')
+    check('moveq   #-128,d0' in src, f'{f}: init seeds the bit queue with $80')
+    check('move.b  d0,d2' in src, f'{f}: init seeds State.START from the same $80')
     check('bmi.s   entry_special' in src, f'{f}: entry dispatches on the sign')
-    check('moveq   #0,d4' in src, f'{f}: LITERALS = 0')
-    check('st      d4' in src, f'{f}: DONE stored with st, in the state register')
-    check('moveq   #0,d3' not in src, f'{f}: no dead clear before new_offset')
-    check('addx.w  d3,d3' in src, f'{f}: two-byte offset folds the carry')
+    check('moveq   #0,d2' in src, f'{f}: LITERALS = 0')
+    check('st      d2' in src, f'{f}: DONE stored with st, in the state register')
+    # d3.w is already zero when new_offset is reached, so clearing it there
+    # would be dead. jx1_init's own moveq #0,d3 is the real initialisation.
+    body = src[src.index('new_offset:'):]
+    check('moveq   #0,d1' not in body, f'{f}: no dead clear before new_offset')
+    check('addx.w  d1,d1' in src, f'{f}: two-byte offset folds the carry')
 
 # 6. no stale ctx_alloc, no stale 15-byte wording anywhere current
 for f in FILES + ['test/jx1_hatari.S', 'test/jx1_hatari_ring.S']:
@@ -120,9 +123,10 @@ check(f'{mod_total} configurations' in test_readme,
 # 12. every size and context size quoted in prose, against the assembled files
 for f in FILES:
     src = (K68 / f).read_text()
-    quoted = [int(n) for n in re.findall(r'\b(\d{3}) bytes\b', src.split('Assumptions')[0])]
-    check(all(n == sizes[f] for n in quoted),
-          f'{f}: header quotes {quoted}, assembles to {sizes[f]}')
+    # the size claim, which every header states the same way. Other byte
+    # counts in the prose (a 256-byte ring, say) are not size claims.
+    quoted = [int(n) for n in re.findall(r'\b(\d{3}) bytes, position-independent', src)]
+    check(quoted == [sizes[f]], f'{f}: header quotes {quoted}, assembles to {sizes[f]}')
 prose = [int(n) for n in re.findall(r'\*\*(\d{3}) bytes', readme)
          + re.findall(r'(\d{3}) bytes of position-independent code', readme)]
 check(all(n in sizes.values() for n in prose),
@@ -134,10 +138,17 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    check('tst.b   d4' in body, f'{f}: the entry dispatches on the state register')
-    check('d4  op state' in src, f'{f}: the header maps the state register')
+    check('tst.b   d2' in body, f'{f}: the entry dispatches on the state register')
+    check('d2  operation state' in src, f'{f}: the header maps the state register')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
+
+# the clobbered set, stated where a caller will look for it
+for f in FILES:
+    src = (K68 / f).read_text()
+    check('CLOBBERED    d4 d5 d6 a4' in src, f'{f}: names the clobbered registers')
+check('| **clobbered** | **`d4` `d5` `d6` `a4`** |' in readme,
+      'README names the clobbered registers')
 
 # 13. the operation-length contract, stated identically in all three headers and
 #     backed by 68k/test/emu/boundaries.py

@@ -11,7 +11,7 @@ sys.argv = ['x', BIN_NAME, '16', '4,8']
 t = importlib.util.module_from_spec(spec); spec.loader.exec_module(t)
 from unicorn.unicorn_const import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A5,
-                                UC_M68K_REG_D0, UC_M68K_REG_D5)
+                                UC_M68K_REG_D5, UC_M68K_REG_D4)
 
 def run(comp, expected, chunk, dst_bias):
     uc = t.make_emu(comp)
@@ -31,7 +31,7 @@ def run(comp, expected, chunk, dst_bias):
     t.call(uc, t.ENTRY_INIT)
     calls = 0
     while True:
-        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is spent by the call,
+        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is spent by the call,
         if t.call(uc, t.ENTRY_RESUME) == 0:     # so it is refilled per call
             break
         calls += 1

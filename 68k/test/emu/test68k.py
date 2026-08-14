@@ -11,7 +11,7 @@ from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN
 from unicorn.unicorn_const import UC_CTL_CPU_MODEL, UC_HOOK_MEM_READ
 from unicorn.m68k_const import (
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A5, UC_M68K_REG_A6,
-    UC_M68K_REG_A7, UC_M68K_REG_D0, UC_M68K_REG_D5, UC_M68K_REG_D6,
+    UC_M68K_REG_A7, UC_M68K_REG_D5, UC_M68K_REG_D4, UC_M68K_REG_D3,
     UC_M68K_REG_D7, UC_M68K_REG_PC,
 )
 
@@ -65,9 +65,9 @@ CODE, CTX, SRC, DST, STACK_TOP, MAGIC = 0x1000, 0x20000, 0x40000, 0x80000, 0xF80
 # Registers the calling convention promises to preserve. a5 is here because the
 # decompressors have no context block at all any more - nothing uses it.
 PRESERVED = {UC_M68K_REG_A5: 0x00021234, UC_M68K_REG_A6: 0xCAFEBABE,
-             UC_M68K_REG_D6: 0xDEADBEEF, UC_M68K_REG_D7: 0xFEEDFACE}
+             UC_M68K_REG_D7: 0xFEEDFACE}
 PRESERVED_NAMES = {UC_M68K_REG_A5: 'a5', UC_M68K_REG_A6: 'a6',
-                   UC_M68K_REG_D6: 'd6', UC_M68K_REG_D7: 'd7'}
+                   UC_M68K_REG_D7: 'd7'}
 ENTRY_INIT, ENTRY_DECOMPRESS, ENTRY_RESUME = CODE + 0, CODE + 4, CODE + 8
 CTX_SIZE = 22
 
@@ -152,7 +152,7 @@ def call(uc: Uc, entry: int, timeout_insns: int = 200_000_000) -> int:
     uc.reg_write(UC_M68K_REG_PC, entry)
     uc.emu_start(entry, MAGIC, count=timeout_insns)
     assert uc.reg_read(UC_M68K_REG_PC) == MAGIC, 'call did not return'
-    return uc.reg_read(UC_M68K_REG_D0) & 0xFFFFFFFF
+    return uc.reg_read(UC_M68K_REG_D5) & 0xFFFFFFFF
 
 def run_resumable(compressed: bytes, expected: bytes, chunk: int) -> None:
     uc = make_emu(compressed)
@@ -165,7 +165,7 @@ def run_resumable(compressed: bytes, expected: bytes, chunk: int) -> None:
     while True:
         calls += 1
         assert calls <= len(expected) + 2, 'resume loop does not terminate'
-        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is a per-call
+        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
         more = call(uc, ENTRY_RESUME)           # parameter now, not state
         cur_dst = uc.reg_read(UC_M68K_REG_A1)   # a1 is where the interface says
         emitted = cur_dst - prev_dst            # the output ends; the context

@@ -41,12 +41,14 @@ reports failures there by design.
 
 ## What they check beyond "the output matches"
 
-* **`poison.py`** fills `d0-d5` with junk before every call. jx1 declares
-  those registers clobbered, which says nothing about their *incoming*
-  values, so a caller may legally pass anything in them. A partial-register
-  bug in both ring decoders survived months of testing because every harness
-  politely passed clean registers; this is the script that reproduces it.
-  The two ring suites poison as a matter of course now.
+* **`poison.py`** checks the register contract from both ends. It fills the
+  clobbered registers — `d5`, `d6`, `a4` — with junk before every call, since
+  a caller may legally pass anything in them; a partial-register bug in both
+  ring decoders survived months of testing because every harness politely
+  passed clean ones. Then it does the converse: it canaries every register
+  the contract does not call state and checks that a call destroys **exactly**
+  `d4`, `d5`, `d6` and `a4`. The two ring suites poison as a matter of course
+  now.
 * **`align68k.py` / `align_ring2.py`** hook every memory access and reject a
   `.w`/`.l` at an odd address. A real 68000 raises an address error there;
   Unicorn does not, so without this the emulator would happily bless code
@@ -74,7 +76,8 @@ reports failures there by design.
   checks jx1 against jx1, where a shared misunderstanding of the format would
   pass unnoticed.
 * **`audit.py`** checks the documentation against the sources: assembled
-  sizes and context sizes against the README's table, jump-table slots
+  sizes against the README's table, that no decoder names `a5` or a context
+  field at all, that every header states the clobbered set, jump-table slots
   against the documented entries, no `cmp.l` on a data register, the state
   encoding the entry dispatch relies on, and that the harnesses still poison
   and still fail on `BAD`.

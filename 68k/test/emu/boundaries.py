@@ -24,8 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test68k as t                                                    # noqa: E402
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN               # noqa: E402
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1,        # noqa: E402
-                                UC_M68K_REG_A3, UC_M68K_REG_A4,
-                                UC_M68K_REG_D0, UC_M68K_REG_D5)
+                                UC_M68K_REG_A2, UC_M68K_REG_A3,
+                                UC_M68K_REG_D5, UC_M68K_REG_D4)
 
 
 def make_emu(stream):
@@ -164,7 +164,7 @@ def run_linear(stream, chunk=None):
     t.call(uc, t.CODE)
     calls = 0
     while True:
-        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is per call now
+        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is per call now
         if t.call(uc, t.CODE + 8) == 0:
             break
         calls += 1
@@ -178,11 +178,11 @@ def run_ring(stream, n, chunk):
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, t.DST)
     t.call(uc, t.CODE)
-    uc.reg_write(UC_M68K_REG_A3, t.DST)
-    uc.reg_write(UC_M68K_REG_A4, t.DST + n)
+    uc.reg_write(UC_M68K_REG_A2, t.DST)
+    uc.reg_write(UC_M68K_REG_A3, t.DST + n)
     out, prev, calls = bytearray(), t.DST, 0
     while True:
-        uc.reg_write(UC_M68K_REG_D5, chunk)
+        uc.reg_write(UC_M68K_REG_D4, chunk)
         more = t.call(uc, t.CODE + 4)
         dst = uc.reg_read(UC_M68K_REG_A1)
         out += uc.mem_read(prev, dst - prev)

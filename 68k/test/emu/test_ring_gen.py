@@ -26,14 +26,14 @@ sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE
-from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A3,
-                                UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_D0,
-                                UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
-                                UC_M68K_REG_D4, UC_M68K_REG_D5,
-                                UC_M68K_REG_A6, UC_M68K_REG_D6, UC_M68K_REG_D7)
-# What a caller may still pass junk in. d2/d3/d4 carry the parse state and
-# d5 is the budget, so the clobber set is what is left.
-CLOBBERED = (UC_M68K_REG_D0, UC_M68K_REG_D1)
+from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
+                                UC_M68K_REG_A3, UC_M68K_REG_A5, UC_M68K_REG_D5,
+                                UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
+                                UC_M68K_REG_D2, UC_M68K_REG_D4,
+                                UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
+# What a caller may still pass junk in. d0-d3 carry the parse state and d4 is
+# the budget, so the clobber set is what is left.
+CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
 # jx1_68000_ring.S wraps a full buffer itself at the next entry; ring_mod
 # requires the caller to. Both are legal callers of the general ring, and only
@@ -62,9 +62,8 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
     t.call(uc, ENTRY_INIT)
-    uc.reg_write(UC_M68K_REG_A3, ring)              # ring bounds are parameters
-    uc.reg_write(UC_M68K_REG_A4, ring + n)
-    uc.reg_write(UC_M68K_REG_D6, 0xDEADBEEF)
+    uc.reg_write(UC_M68K_REG_A2, ring)              # ring bounds are parameters
+    uc.reg_write(UC_M68K_REG_A3, ring + n)
     uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
     uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
 
@@ -75,7 +74,7 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         assert calls < 20 + 4 * (len(expected) // max(1, min(chunk, n)) + 1), 'runaway'
         for reg in CLOBBERED:               # the ABI calls these clobbered, so
             uc.reg_write(reg, 0xBEEF0000)   # a caller may pass anything in them
-        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is a per-call
+        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
         r = t.call(uc, ENTRY_RESUME)            # parameter, not state
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         assert dst >= prev, f'write pointer went backwards inside a call: {dst} < {prev}'
@@ -87,13 +86,12 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         else:                                   # let the decoder wrap on entry
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_A3) == ring, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A4) == ring + n, 'a4 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A2) == ring, 'a3 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A3) == ring + n, 'a4 clobbered'
         if r == 0:
             break
         assert r == 1, f'bad return {r} (this variant returns only 0/1)'
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
-    assert uc.reg_read(UC_M68K_REG_D6) == 0xDEADBEEF, 'd6 clobbered'
     assert uc.reg_read(UC_M68K_REG_D7) == 0xFEEDFACE, 'd7 clobbered'
     assert uc.reg_read(UC_M68K_REG_A6) == 0xCAFEBABE, 'a6 clobbered'
     consumed = read_high[0] - t.SRC          # every byte of the stream, and
