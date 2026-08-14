@@ -31,8 +31,8 @@
 ; 3. THE POINTERS ARE NOT STATE. The caller already holds the ring bounds -
 ;    it needs them to drain - so it passes them read-only in a3/a4, and it
 ;    holds the write pointer in a1 for the same reason. The context is left
-;    with the parse state alone, 12 bytes: four FEWER than the linear
-;    decompressor needs, because that one has to store its destination.
+;    with the parse state alone, 12 bytes - the same as the linear
+;    decompressor, which holds its write pointer the same way.
 ;
 ; A match source running into the end of the buffer still splits a copy into
 ; segments, so the rolled-out ladder itself never needs a bounds test. The

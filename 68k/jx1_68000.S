@@ -33,25 +33,28 @@
 ;      longer match; a plain stream can exceed it and would decode short here
 ;   2. the chunk size is 1..127
 ;
-; The context must be word-aligned and is 16 bytes.
+; The context must be word-aligned and is 12 bytes - the same as the two ring
+; versions, and for the same reason: the write pointer is the caller's.
 ;
-; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0-a2 and leave
-; a5 = context untouched; jx1_decompress additionally uses (but restores)
-; a5. (d4 carries the op state.)
+; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0/a2 and leave
+; a5 = context untouched; a1 is the caller's write pointer, taken in and
+; handed back, so a resume loop simply leaves it alone between calls.
+; jx1_decompress additionally uses (but restores) a5, and keeps a1 itself.
+; (d4 carries the op state.)
 ; -----------------------------------------------------------------------------
 
 
-; Context block (Java: Decompressor's fields). The first three longwords are
-; laid out in movem order d3,a0,a1.
+; Context block (Java: Decompressor's fields). The write pointer is NOT here:
+; the caller holds it, exactly as the ring versions do. The two longwords are
+; in movem order d3,a0.
 ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
 ctx_src         equ     4               ; .l  a0: input position
-ctx_dst         equ     8               ; .l  a1: output position
-ctx_chunk       equ     12              ; .w  chunkSize (X), 1..127 (a word: the
+ctx_chunk       equ     8               ; .w  chunkSize (X), 1..127 (a word: the
                                         ;     budget is only ever used word-wide,
                                         ;     so the entry loads it as one)
-ctx_bits        equ     14              ; .b  bit buffer
-ctx_state       equ     15              ; .b  State: $80 START, 0 LITERALS,
-ctx_size        equ     16              ;     2 MATCH, $FF DONE - signed, so the
+ctx_bits        equ     10              ; .b  bit buffer
+ctx_state       equ     11              ; .b  State: $80 START, 0 LITERALS,
+ctx_size        equ     12              ;     2 MATCH, $FF DONE - signed, so the
                                         ;     entry dispatches on the load's flags
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4/8).
@@ -69,8 +72,8 @@ jx1_init:
         swap    d3                      ; lastOffset = INITIAL_OFFSET, remaining = 0
         swap    d0                      ; the last longword is the chunk word,
         move.w  #$8080,d0               ; an empty bit buffer and State.START,
-        movea.l d0,a2                   ; so the whole context is four registers
-        movem.l d3/a0-a2,(a5)           ; in movem order and one store
+        movea.l d0,a2                   ; so the whole context is three registers
+        movem.l d3/a0/a2,(a5)           ; in movem order and one store
         rts
 
 ; -----------------------------------------------------------------------------
@@ -96,9 +99,10 @@ jx1_decompress:
         rts
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a5 = context. Emits at most ctx_chunk output bytes.
-; Returns d0 = 0 when the stream is fully processed, 1 when there is more;
-; a1 = current end of output. Java: Decompressor.resume().
+; jx1_resume: a5 = context, a1 = write pointer. Emits at most ctx_chunk output
+; bytes. Returns d0 = 0 when the stream is fully processed, 1 when there is
+; more; a1 = the current end of output, which is what the next call takes in.
+; Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 entry_special:                          ; the negative states, both rare
         add.b   d4,d4                   ; START ($80) doubles to zero; DONE
@@ -109,7 +113,8 @@ entry_done:
         rts
 
 jx1_resume:
-        movem.l (a5)+,d3/a0-a1          ; packed offset/remaining, src, dst
+        movem.l (a5)+,d3/a0             ; packed offset/remaining, src; a1 is the
+                                        ; caller's, in and out
         move.w  (a5)+,d5                ; budget = chunkSize
         move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
         move.b  (a5),d4                 ; op state (Java: switch in next()) -
@@ -246,7 +251,7 @@ suspend:                                ; Java: resume() returning true
         move.b  d4,(a5)                 ; the interrupted op's state, verbatim
         move.b  d2,-(a5)                ; bit buffer
         subq.l  #2,a5                   ; skip the chunk word
-        movem.l d3/a0-a1,-(a5)          ; stores in layout order, a5 = context base
+        movem.l d3/a0,-(a5)             ; stores in layout order, a5 = context base
         moveq   #1,d0                   ; more output pending: call again
         rts
 

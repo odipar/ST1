@@ -60,13 +60,13 @@ safe on a 68000. Both are valid, and both decode to the same bytes.
 ## The 68k decompressors
 
 Three files, all ported from the Java `Decompressor` state machine, sharing
-the same parser and the same copy engine. They differ in where the output
-goes, in what the caller has to promise, and — because the rings hand the
-write pointer back to the caller — in how much context they need:
+the same parser, the same copy engine and the same 12-byte context — all
+three hand the write pointer back to the caller rather than storing it. They
+differ in where the output goes and in what the caller has to promise:
 
 | File | Code | Context | Output | Entries |
 |---|---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 290 B | 16 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 290 B | 12 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 290 B | 12 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 272 B | 12 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
@@ -80,7 +80,7 @@ project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
 chosen). It came out of an 18-variant optimization campaign as the sweet
 spot between speed, size, and readability:
 
-* 290 bytes of position-independent code, 16-byte word-aligned context
+* 290 bytes of position-independent code, 12-byte word-aligned context
 * one body — no macros, no tables, no self-modifying code; runs from ROM,
   unlimited concurrent contexts
 * +32–36% faster than the straight reference port at chunk 16 (+42–52% at
@@ -117,7 +117,7 @@ bytes produces a longest literal run of about 3300.
 ### Calling it
 
 The decompressor is position-independent and has no global state: everything
-lives in a caller-supplied context block of 16 bytes, which
+lives in a caller-supplied context block of 12 bytes, which
 must be **word-aligned**. `jx1_init` takes the stream in `a0`, the destination
 in `a1`, the chunk size in `d0.w` (1..127) and the context in `a5`; each
 `jx1_resume` then emits at most one chunk and returns `d0 = 0` once the stream
@@ -127,10 +127,10 @@ is fully processed, leaving `a1` at the current end of output:
         lea     stream,a0               ; compressed data
         lea     output,a1               ; destination
         moveq   #16,d0                  ; chunk size X
-        lea     context,a5              ; 16 bytes, word-aligned
+        lea     context,a5              ; 12 bytes, word-aligned
         bsr     jx1_init
 .chunk:
-        bsr     jx1_resume              ; at most X bytes per call
+        bsr     jx1_resume              ; at most X bytes per call; a1 in and out
         ; ... per-chunk work here; a1 = end of output so far ...
         tst.w   d0
         bne.s   .chunk                  ; Java: while (resume()) { ... }
@@ -147,7 +147,7 @@ decompressors stop writing the other fields back on the final call, since
 nothing reads them again. `a1` is where the output ends, on every call
 including the last, and polling a finished stream keeps returning 0.
 
-Both entries clobber `d0-d5/a0-a2` and leave `a5` untouched (`jx1_decompress`
+Both entries clobber `d0-d5/a0/a2` and leave `a5` untouched (`jx1_decompress`
 uses but restores `a5`); `d6/d7` and `a3/a4/a6` are never touched. Matches are
 copied from the destination itself — the output buffer is the window, so it
 must hold everything decompressed so far. To decompress into **bounded
@@ -165,10 +165,10 @@ parser, copy engine, entry work and interface — so read this section for
 both.
 
 Neither needs a callback or an extra return code: `jx1_resume` still returns
-just 0 (done) and 1 (more). The context is **12 bytes — four fewer than the
-linear version needs**, because the pointers are the caller's: it holds the
-ring bounds in a3/a4 (it needs them to drain) and the write pointer in a1 for
-the same reason, leaving the context holding parse state alone.
+just 0 (done) and 1 (more), and the context is the same **12 bytes** all three
+use — the pointers are the caller's. It holds the ring bounds in a3/a4 (it
+needs them to drain) and the write pointer in a1 for the same reason, leaving
+the context holding parse state alone.
 
 `jx1_resume` (slot base+4 — there is no one-shot, since a bounded buffer has
 to be drained) takes the ring bounds read-only in a3/a4 and the write pointer
