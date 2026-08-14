@@ -9,8 +9,8 @@ POS = [a for a in ARGS[1:] if not a.startswith('-')]   # flags (--full) are not 
 sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 from unicorn.unicorn_const import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
-from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A5, UC_M68K_REG_D5,
-                                UC_M68K_REG_D0, UC_M68K_REG_A3, UC_M68K_REG_A4)
+from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A5, UC_M68K_REG_D4,
+                                UC_M68K_REG_D5, UC_M68K_REG_A2, UC_M68K_REG_A3)
 bad = []
 def audit(shapes):
     for name, data, m in t.testcases():
@@ -23,10 +23,10 @@ def audit(shapes):
                             bad.append((name, n, chunk, off, hex(addr), size))
                             if size >= 2 and addr & 1 else None)
             uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
-            uc.reg_write(UC_M68K_REG_A3, ring); uc.reg_write(UC_M68K_REG_A4, ring + n)
+            uc.reg_write(UC_M68K_REG_A2, ring); uc.reg_write(UC_M68K_REG_A3, ring + n)
             t.call(uc, t.CODE)
             while True:
-                uc.reg_write(UC_M68K_REG_D5, chunk)   # the budget is per call
+                uc.reg_write(UC_M68K_REG_D4, chunk)   # the budget is per call
                 more = t.call(uc, t.CODE + 4)
                 if uc.reg_read(UC_M68K_REG_A1) == ring + n:
                     uc.reg_write(UC_M68K_REG_A1, ring)  # ring_mod needs this of

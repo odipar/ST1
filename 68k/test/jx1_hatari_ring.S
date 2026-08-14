@@ -9,7 +9,7 @@
 ; Nothing is accumulated: each call's output is compared against the expected
 ; image as it is drained, which is exactly what a real caller does with it,
 ; and the wrap is detected the way the interface intends - the write pointer
-; never wraps inside a call, so a full buffer shows up as a1 == a4. a1 is the
+; never wraps inside a call, so a full buffer shows up as a1 == a3. a1 is the
 ; caller's: it goes in and comes back out, and for jx1_68000_ring_mod.S the
 ; caller wraps it as well.
 ;
@@ -68,7 +68,8 @@ start:
         move.w  shapeidx,d0
         lsl.w   #3,d0
         adda.w  d0,a0
-        move.l  (a0)+,d6                        ; ring size (0 ends the table)
+        move.l  (a0)+,ringsz                    ; ring size (0 ends the table);
+                                                ; d6 belongs to the decoder now
         beq.s   .shapesdone
         move.l  (a0),d7                         ; chunk size
         bsr     verify_ring
@@ -100,7 +101,7 @@ start:
 .tcase:
         tst.l   CASE_NAME(a6)
         beq     .done
-        move.l  #RING_BIG,d6
+        move.l  #RING_BIG,ringsz
         moveq   #16,d7
         bsr     time_ring
         lea     CASE_SIZE(a6),a6
@@ -118,14 +119,14 @@ start:
         trap    #GEMDOS                         ; Pterm0
 
 ; -----------------------------------------------------------------------------
-; verify_ring: a6 = case, d6.l = ring size, d7.w = chunk size.
+; verify_ring: a6 = case, ringsz = ring size, d7.w = chunk size.
 ; Streams the case through the ring, comparing every drained byte against the
 ; expected image, and prints "<size>/<chunk>=OK" or "=BAD".
 ; -----------------------------------------------------------------------------
 verify_ring:
         lea     m_r,a0
         bsr     puts
-        move.l  d6,d0
+        move.l  ringsz,d0
         bsr     putdec
         lea     m_slash,a0
         bsr     puts
@@ -143,15 +144,15 @@ verify_ring:
         move.l  CASE_EXP(a6),expptr
         move.l  CASE_ELEN(a6),expleft
 .loop:
-        move.l  #$BEEF0000,d0                   ; d0/d1/a2 are what is still
-        move.l  d0,d1                           ; clobbered - the parse state is
-        movea.l d0,a2                           ; in a0/a1/d2/d3/d4 between calls
-        move.w  d7,d5                           ; and d5 is this call's budget
+        move.l  #$BEEF0000,d5                   ; d5/d6/a4 are what is still
+        move.l  d5,d6                           ; clobbered - the parse state is
+        movea.l d5,a4                           ; in a0/a1/d0-d3 between calls
+        move.w  d7,d4                           ; and d4 is this call's budget
         bsr     jx1_resume                      ; a1 = write pointer, d0 = 0/1
-        movem.l d2-d4/a0,(a5)                   ; the parse state is in registers
+        movem.l d0-d3/a0,(a5)                   ; the parse state is in registers
                                                 ; now, and the draining below
                                                 ; clobbers a0 for its compare
-        move.w  d0,retcode
+        move.w  d5,retcode
         move.l  a1,curdst
 
         move.l  a1,d0
@@ -173,14 +174,14 @@ verify_ring:
 .nodata:
         move.l  curdst,prev
         movea.l curdst,a1                       ; the caller holds the write
-        cmpa.l  a4,a1                           ; pointer now: hand it back
+        cmpa.l  a3,a1                           ; pointer now: hand it back
         bne.s   .more                           ; buffer full?
-        move.l  a3,prev
+        move.l  a2,prev
     .if RINGMOD
-        movea.l a3,a1                           ; ring_mod does not wrap for us
+        movea.l a2,a1                           ; ring_mod does not wrap for us
     .endif
 .more:
-        movem.l (a5),d2-d4/a0                   ; hand the state back for the
+        movem.l (a5),d0-d3/a0                   ; hand the state back for the
         tst.w   retcode                         ; next call (in memory, not on
         bne     .loop                           ; the stack: .bad leaves early)
 
@@ -217,9 +218,9 @@ check_size:
         beq.s   .bad                            ; ...and never nothing
         addq.w  #1,nshort
         movea.l curdst,a0                       ; a short call must sit exactly
-        cmpa.l  a4,a0                           ; at the end of the buffer
+        cmpa.l  a3,a0                           ; at the end of the buffer
         bne.s   .bad
-        move.l  d6,d1                           ; ...and must not be possible at
+        move.l  ringsz,d1                       ; ...and must not be possible at
         divu.w  d7,d1                           ; all when the chunk divides the
         swap    d1                              ; buffer
         tst.w   d1
@@ -231,16 +232,16 @@ check_size:
         tst.l   d0                              ; restore the caller's flags
         rts
 
-; ring_init: a6 = case, d6.l = ring size, d7.w = chunk. Leaves a3/a4 as the
+; ring_init: a6 = case, ringsz = ring size, d7.w = chunk. Leaves a2/a3 as the
 ; ring bounds (the decompressor never modifies them). There is no context to
 ; set up: jx1_init just seeds the state registers.
 ring_init:
         movea.l CASE_SRC(a6),a0
         lea     ring_buf,a1
         bsr     jx1_init
-        lea     ring_buf,a3
-        movea.l a3,a4
-        adda.l  d6,a4
+        lea     ring_buf,a2
+        movea.l a2,a3
+        adda.l  ringsz,a3
         rts
 
 ; -----------------------------------------------------------------------------
@@ -255,7 +256,7 @@ time_ring:
         bsr     puts
         lea     m_sp,a0
         bsr     puts
-        move.l  d6,d0
+        move.l  ringsz,d0
         bsr     putdec
         lea     m_sp,a0
         bsr     puts
@@ -273,15 +274,15 @@ time_ring:
 .loop:
         bsr     ring_init
 .drain:
-        move.w  d7,d5                           ; the budget is a parameter now
+        move.w  d7,d4                           ; the budget is a parameter now
         bsr     jx1_resume
     .if RINGMOD
-        cmpa.l  a4,a1                           ; a real caller folds this into
+        cmpa.l  a3,a1                           ; a real caller folds this into
         bne.s   .nowrap                         ; the drain branch it already
-        movea.l a3,a1                           ; has; here it is explicit
+        movea.l a2,a1                           ; has; here it is explicit
 .nowrap:
     .endif
-        tst.w   d0
+        tst.w   d5
         bne.s   .drain
         subq.l  #1,iters
         bne.s   .loop
@@ -334,7 +335,8 @@ m_t:        dc.b    "T ",0
         even
 save_ssp:   ds.l    1
 iters:      ds.l    1
-state:      ds.l    4                           ; d2-d4/a0 across a drain
+state:      ds.l    5                           ; d0-d3/a0 across a drain
+ringsz:     ds.l    1                           ; was d6, which is state now
 prev:       ds.l    1
 curdst:     ds.l    1
 expptr:     ds.l    1
