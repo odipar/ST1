@@ -11,8 +11,8 @@ from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN
 from unicorn.unicorn_const import UC_CTL_CPU_MODEL, UC_HOOK_MEM_READ
 from unicorn.m68k_const import (
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A5, UC_M68K_REG_A6,
-    UC_M68K_REG_A7, UC_M68K_REG_D0, UC_M68K_REG_D6, UC_M68K_REG_D7,
-    UC_M68K_REG_PC,
+    UC_M68K_REG_A7, UC_M68K_REG_D0, UC_M68K_REG_D5, UC_M68K_REG_D6,
+    UC_M68K_REG_D7, UC_M68K_REG_PC,
 )
 
 import sys
@@ -55,15 +55,15 @@ def _binary(name):
 
 POS = [a for a in sys.argv[1:] if not a.startswith('-')]   # flags are not positional
 BIN = _binary(POS[0] if POS else 'jx1_68000.bin')
-CHUNKS = [int(c) for c in POS[1].split(',')] if len(POS) > 1 else [16, 1, 7, 127]
+CHUNKS = [int(c) for c in POS[1].split(',')] if len(POS) > 1 else [16, 1, 7, 127, 255, 4096]
 QUICK = '--quick' in sys.argv     # the whole matrix runs by default: with the
                                   # streams cached below, every combination
                                   # together costs a few seconds. --quick drops
                                   # the ones whose cost is calls, not coverage
 
 CODE, CTX, SRC, DST, STACK_TOP, MAGIC = 0x1000, 0x20000, 0x40000, 0x80000, 0xF8000, 0xE0000
-# Registers the calling convention promises to preserve. a5 is here because
-# jx1_decompress uses it for its private context and must put it back.
+# Registers the calling convention promises to preserve. a5 is here because the
+# decompressors have no context block at all any more - nothing uses it.
 PRESERVED = {UC_M68K_REG_A5: 0x00021234, UC_M68K_REG_A6: 0xCAFEBABE,
              UC_M68K_REG_D6: 0xDEADBEEF, UC_M68K_REG_D7: 0xFEEDFACE}
 PRESERVED_NAMES = {UC_M68K_REG_A5: 'a5', UC_M68K_REG_A6: 'a6',
@@ -159,15 +159,14 @@ def run_resumable(compressed: bytes, expected: bytes, chunk: int) -> None:
     read_high = track_source_reads(uc, SRC)
     uc.reg_write(UC_M68K_REG_A0, SRC)
     uc.reg_write(UC_M68K_REG_A1, DST)
-    uc.reg_write(UC_M68K_REG_D0, chunk)
-    uc.reg_write(UC_M68K_REG_A5, CTX)
     call(uc, ENTRY_INIT)
 
     calls, prev_dst = 0, DST
     while True:
         calls += 1
         assert calls <= len(expected) + 2, 'resume loop does not terminate'
-        more = call(uc, ENTRY_RESUME)
+        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is a per-call
+        more = call(uc, ENTRY_RESUME)           # parameter now, not state
         cur_dst = uc.reg_read(UC_M68K_REG_A1)   # a1 is where the interface says
         emitted = cur_dst - prev_dst            # the output ends; the context
                                                 # field is not live after DONE

@@ -135,19 +135,22 @@ verify_ring:
         bsr     puts
 
         bsr     ring_init
+        lea     state,a5                        ; a5 is free: no decompressor
+                                                ; touches it any more
         clr.w   nshort                          ; short calls seen (before the last)
         clr.b   sizebad
         move.l  #ring_buf,prev                  ; first undrained byte
         move.l  CASE_EXP(a6),expptr
         move.l  CASE_ELEN(a6),expleft
 .loop:
-        move.l  #$BEEF0000,d0                   ; the ABI calls d0-d5 clobbered,
-        move.l  d0,d1                           ; so a caller may pass anything
-        move.l  d0,d2                           ; in them; prove the decoder
-        move.l  d0,d3                           ; never reads their upper words
-        move.l  d0,d4
-        move.l  d0,d5
+        move.l  #$BEEF0000,d0                   ; d0/d1/a2 are what is still
+        move.l  d0,d1                           ; clobbered - the parse state is
+        movea.l d0,a2                           ; in a0/a1/d2/d3/d4 between calls
+        move.w  d7,d5                           ; and d5 is this call's budget
         bsr     jx1_resume                      ; a1 = write pointer, d0 = 0/1
+        movem.l d2-d4/a0,(a5)                   ; the parse state is in registers
+                                                ; now, and the draining below
+                                                ; clobbers a0 for its compare
         move.w  d0,retcode
         move.l  a1,curdst
 
@@ -177,8 +180,9 @@ verify_ring:
         movea.l a3,a1                           ; ring_mod does not wrap for us
     .endif
 .more:
-        tst.w   retcode
-        bne.s   .loop
+        movem.l (a5),d2-d4/a0                   ; hand the state back for the
+        tst.w   retcode                         ; next call (in memory, not on
+        bne     .loop                           ; the stack: .bad leaves early)
 
         tst.l   expleft                         ; every expected byte accounted
         bne.s   .bad                            ; for?
@@ -228,12 +232,11 @@ check_size:
         rts
 
 ; ring_init: a6 = case, d6.l = ring size, d7.w = chunk. Leaves a3/a4 as the
-; ring bounds (the decompressor never modifies them) and a5 = context.
+; ring bounds (the decompressor never modifies them). There is no context to
+; set up: jx1_init just seeds the state registers.
 ring_init:
         movea.l CASE_SRC(a6),a0
         lea     ring_buf,a1
-        move.l  d7,d0
-        lea     ctx,a5
         bsr     jx1_init
         lea     ring_buf,a3
         movea.l a3,a4
@@ -270,6 +273,7 @@ time_ring:
 .loop:
         bsr     ring_init
 .drain:
+        move.w  d7,d5                           ; the budget is a parameter now
         bsr     jx1_resume
     .if RINGMOD
         cmpa.l  a4,a1                           ; a real caller folds this into
@@ -330,6 +334,7 @@ m_t:        dc.b    "T ",0
         even
 save_ssp:   ds.l    1
 iters:      ds.l    1
+state:      ds.l    4                           ; d2-d4/a0 across a drain
 prev:       ds.l    1
 curdst:     ds.l    1
 expptr:     ds.l    1
@@ -339,7 +344,6 @@ nshort:     ds.w    1
 shapeidx:   ds.w    1
 sizebad:    ds.b    1
         even
-ctx:        ds.b    16                          ; jx1 context
         even
 ring_buf:   ds.b    RING_BIG                    ; the whole point: far smaller
         even                                    ; than the data streamed through

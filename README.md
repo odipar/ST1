@@ -60,15 +60,15 @@ safe on a 68000. Both are valid, and both decode to the same bytes.
 ## The 68k decompressors
 
 Three files, all ported from the Java `Decompressor` state machine, sharing
-the same parser, the same copy engine and the same 12-byte context — all
-three hand the write pointer back to the caller rather than storing it. They
-differ in where the output goes and in what the caller has to promise:
+the same parser and the same copy engine, and **none of them has a context
+block**: the whole state lives in the caller's registers. They differ in where
+the output goes and in what the caller has to promise:
 
-| File | Code | Context | Output | Entries |
-|---|---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 290 B | 12 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 290 B | 12 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 272 B | 12 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
+| File | Code | Output | Entries |
+|---|---|---|---|
+| [jx1_68000.S](68k/jx1_68000.S) | 242 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 256 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 238 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -80,15 +80,16 @@ project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
 chosen). It came out of an 18-variant optimization campaign as the sweet
 spot between speed, size, and readability:
 
-* 290 bytes of position-independent code, 12-byte word-aligned context
-* one body — no macros, no tables, no self-modifying code; runs from ROM,
-  unlimited concurrent contexts
+* 242 bytes of position-independent code, and no context block at all
+* one body — no macros, no tables, no self-modifying code; runs from ROM, and
+  with no context to allocate, a second stream is just a second set of
+  registers
 * +32–36% faster than the straight reference port at chunk 16 (+42–52% at
   chunk 127) when it was chosen, and faster again since — measured under a
   cycle-accurate emulation model and confirmed on an Atari ST
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
-  longer than 32K, chunk sizes 1..127
+  longer than 65535 bytes; budgets 1..65535
 
 ### Trusted input only
 
@@ -116,42 +117,51 @@ bytes produces a longest literal run of about 3300.
 
 ### Calling it
 
-The decompressor is position-independent and has no global state: everything
-lives in a caller-supplied context block of 12 bytes, which
-must be **word-aligned**. `jx1_init` takes the stream in `a0`, the destination
-in `a1`, the chunk size in `d0.w` (1..127) and the context in `a5`; each
-`jx1_resume` then emits at most one chunk and returns `d0 = 0` once the stream
-is fully processed, leaving `a1` at the current end of output:
+The decompressor is position-independent and has **no context block and no
+global state**: the whole thing lives in five caller-held registers, and a
+resume loop just leaves them alone between calls.
+
+| register | role |
+|---|---|
+| `a0` | input position |
+| `a1` | write pointer — where the output ends, after every call |
+| `d2` | bit queue |
+| `d3` | last offset, and the bytes remaining in the current operation |
+| `d4` | operation state |
+
+`jx1_init` takes the stream in `a0` and the destination in `a1`, and seeds the
+other three. Each `jx1_resume` emits at most `d5.w` bytes and returns `d0 = 0`
+once the stream is fully processed. The budget is a **parameter, not state**,
+so pass it every call — which also means a caller may vary it, or hand over a
+whole 65535 at once:
 
 ```
         lea     stream,a0               ; compressed data
         lea     output,a1               ; destination
-        moveq   #16,d0                  ; chunk size X
-        lea     context,a5              ; 12 bytes, word-aligned
-        bsr     jx1_init
+        bsr     jx1_init                ; seeds d2/d3/d4; writes no memory
 .chunk:
-        bsr     jx1_resume              ; at most X bytes per call; a1 in and out
+        moveq   #16,d5                  ; at most 16 bytes from this call
+        bsr     jx1_resume
         ; ... per-chunk work here; a1 = end of output so far ...
         tst.w   d0
         bne.s   .chunk                  ; Java: while (resume()) { ... }
 ```
 
+The only rule is the obvious one: whatever the per-chunk work does, it must
+leave `a0`, `a1`, `d2`, `d3` and `d4` as it found them, since those *are* the
+decompressor. `d0`, `d1`, `d5` and `a2` are free — and so is `a5`, which the
+context used to occupy.
+
 `jx1_decompress` (a0 = stream, a1 = destination) is the one-shot convenience:
 it runs the whole stream and returns with `a1` at the end of the output. It
-drives the same machinery with a private budget of 65535 rather than a chunk,
-so a 32 KB output is one pass instead of 252 — worth +4.2% to +16.3% over
-resuming at 127, for the same two bytes of code.
+passes itself a budget of 65535, so a 32 KB output is one pass instead of 252
+— worth +4.2% to +16.3% over resuming at 127, for the same two bytes of code.
 
-Once a stream is finished the context holds **only its state byte**: the
-decompressors stop writing the other fields back on the final call, since
-nothing reads them again. `a1` is where the output ends, on every call
-including the last, and polling a finished stream keeps returning 0.
-
-Both entries clobber `d0-d5/a0/a2` and leave `a5` untouched (`jx1_decompress`
-uses but restores `a5`); `d6/d7` and `a3/a4/a6` are never touched. Matches are
-copied from the destination itself — the output buffer is the window, so it
-must hold everything decompressed so far. To decompress into **bounded
-memory**, use one of the ring-buffer versions below.
+Polling a finished stream keeps returning 0, and `a1` is where the output
+ends, on every call including the last. Matches are copied from the
+destination itself — the output buffer is the window, so it must hold
+everything decompressed so far. To decompress into **bounded memory**, use one
+of the ring-buffer versions below.
 
 ### The ring-buffer versions
 
@@ -165,10 +175,10 @@ parser, copy engine, entry work and interface — so read this section for
 both.
 
 Neither needs a callback or an extra return code: `jx1_resume` still returns
-just 0 (done) and 1 (more), and the context is the same **12 bytes** all three
-use — the pointers are the caller's. It holds the ring bounds in a3/a4 (it
-needs them to drain) and the write pointer in a1 for the same reason, leaving
-the context holding parse state alone.
+just 0 (done) and 1 (more), and neither has a context block either. They take
+the same five state registers as the linear version plus the ring bounds,
+read-only, in `a3`/`a4` — the caller holds those anyway, since it needs them
+to drain.
 
 `jx1_resume` (slot base+4 — there is no one-shot, since a bounded buffer has
 to be drained) takes the ring bounds read-only in a3/a4 and the write pointer
@@ -181,14 +191,13 @@ already have.
 ```
         lea     stream,a0
         lea     ring,a1                 ; N bytes; no alignment requirement
-        moveq   #16,d0                  ; chunk size X
-        lea     context,a5              ; 12 bytes, word-aligned
-        bsr     jx1_init
-        lea     ring,a3                 ; the pointers are the caller's:
-        lea     ring+4096,a4            ; bounds in a3/a4, write pointer in a1
+        bsr     jx1_init                ; seeds d2/d3/d4; writes no memory
+        lea     ring,a3                 ; the state is all the caller's: bounds
+        lea     ring+4096,a4            ; in a3/a4, write pointer in a1
         movea.l a3,a6                   ; a6 = first undrained byte
 .chunk:
-        bsr     jx1_resume              ; a1 in and out
+        moveq   #16,d5                  ; at most 16 bytes from this call
+        bsr     jx1_resume
         ; consume [a6 .. a1)
         movea.l a1,a6
         cmpa.l  a4,a1                   ; buffer full?
@@ -203,9 +212,9 @@ Decoding the same stream, the ring costs this much over the linear version:
 
 | chunk X | N = 1024 | N = 4096 | N = 32512 |
 |---|---|---|---|
-| 16 | +9.5…11.4% | +9.4…10.8% | +9.4…10.8% |
-| 64 | +4.8…10.1% | +4.7…9.4% | +4.7…9.4% |
-| 127 | +3.0…9.9% | +2.9…9.2% | +2.9…9.2% |
+| 16 | +13.9…17.1% | +13.3…16.5% | +13.3…16.4% |
+| 64 | +6.7…10.8% | +6.6…10.2% | +6.6…10.2% |
+| 127 | +3.9…10.2% | +3.8…9.6% | +3.8…9.6% |
 
 (ranges across the six benchmark corpora, 360 to 33012 bytes of output from
 6- to 32589-byte streams; per-corpus sizes and figures are in
@@ -241,7 +250,7 @@ whole number of chunks and never fewer than one. The budget therefore needs
 no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
-**272 bytes, and +1.9% to +4.0% faster than the general ring** — measured on
+**238 bytes, and faster than the general ring** — measured on
 the Atari ST, against the +1.5% to +3.7% the cycle model predicts. Both files
 carry the same entry work otherwise, so that difference is the price of the
 general ring's room arithmetic and nothing else.

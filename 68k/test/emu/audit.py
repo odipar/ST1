@@ -9,14 +9,14 @@ def check(cond, msg):
     (ok if cond else bad).append(msg)
 
 FILES = ['jx1_68000.S', 'jx1_68000_ring.S', 'jx1_68000_ring_mod.S']
-sizes, ctxsize = {}, {}
+sizes = {}
 for f in FILES:
     out = subprocess.run(ASM + ['-o', '/tmp/a.bin', str(K68 / f)],
                          capture_output=True, text=True)
     check(out.returncode == 0, f'{f} assembles')
     sizes[f] = Path('/tmp/a.bin').stat().st_size
     src = (K68 / f).read_text()
-    ctxsize[f] = int(re.search(r'^ctx_size\s+equ\s+(\d+)', src, re.M).group(1))
+
 
 readme = (REPO / 'README.md').read_text()
 test_readme = (K68 / 'test' / 'README.md').read_text()
@@ -24,11 +24,9 @@ lic = (REPO / 'LICENSE').read_text()
 
 # 1. sizes and context sizes as tabled in the main README
 for f in FILES:
-    row = re.search(rf'\[{re.escape(f)}\]\([^)]*\) \| (\d+) B \| (\d+) B', readme)
+    row = re.search(rf'\[{re.escape(f)}\]\([^)]*\) \| (\d+) B \|', readme)
     check(row and int(row.group(1)) == sizes[f],
           f'{f}: README size {row.group(1) if row else "?"} B vs actual {sizes[f]} B')
-    check(row and int(row.group(2)) == ctxsize[f],
-          f'{f}: README context {row.group(2) if row else "?"} B vs ctx_size {ctxsize[f]}')
 
 # 2. no long compare can read a caller-clobbered register's upper word
 for f in FILES:
@@ -44,25 +42,23 @@ for f in FILES:
               else ['jx1_init', 'jx1_resume'])
     check(slots == expect, f'{f}: jump table {slots} vs documented {expect}')
 
-# 4. the chunk field is a word and jx1_init documents d0.w
+# 4. the budget is a per-call parameter in d5.w, not a field and not state
 for f in FILES:
     src = (K68 / f).read_text()
-    i = re.search(r'^jx1_init:', src, re.M).start()      # the label, not the comment
-    init = src[i:i + 400]
-    check('swap    d0' in init, f'{f}: init takes the chunk from d0.w into the packed word')
-    check('d0.w = chunk size' in src, f'{f}: init documents d0.w')
-    check('.w  chunkSize' in src, f'{f}: the field comment says word')
+    check('d0.w = chunk size' not in src, f'{f}: init no longer takes a chunk')
+    check("d5.w = this call's budget" in src, f'{f}: resume documents the budget in d5.w')
+    check('the budget d5.w is 1..65535' in src, f'{f}: the budget range is stated')
 
 # 5. the state encoding the entry dispatch relies on
 for f in FILES:
     src = (K68 / f).read_text()
-    check('move.w  #$8080,d0' in src, f'{f}: init packs bits+START as $8080')
-    # all three hand the write pointer to the caller, so all three store the
-    # same three registers - and the same 12-byte context
-    check('movem.l d3/a0/a2,(a5)' in src, f'{f}: init stores the context in one movem')
+    # init writes nothing: it just seeds the three registers that are not
+    # pointers, and $80 serves as both the empty bit queue and State.START
+    check('moveq   #-128,d2' in src, f'{f}: init seeds the bit queue with $80')
+    check('move.b  d2,d4' in src, f'{f}: init seeds State.START from the same $80')
     check('bmi.s   entry_special' in src, f'{f}: entry dispatches on the sign')
     check('moveq   #0,d4' in src, f'{f}: LITERALS = 0')
-    check('st      (a5)' in src, f'{f}: DONE stored with st')
+    check('st      d4' in src, f'{f}: DONE stored with st, in the state register')
     check('moveq   #0,d3' not in src, f'{f}: no dead clear before new_offset')
     check('addx.w  d3,d3' in src, f'{f}: two-byte offset folds the carry')
 
@@ -131,11 +127,17 @@ prose = [int(n) for n in re.findall(r'\*\*(\d{3}) bytes', readme)
          + re.findall(r'(\d{3}) bytes of position-independent code', readme)]
 check(all(n in sizes.values() for n in prose),
       f'README prose quotes sizes {prose}, actual {sorted(sizes.values())}')
-ctx_prose = [int(n) for n in re.findall(r'(\d+)-byte word-aligned context', readme)]
-check(all(n in ctxsize.values() for n in ctx_prose),
-      f'README prose quotes contexts {ctx_prose}, actual {sorted(set(ctxsize.values()))}')
-check(len(set(ctxsize.values())) == 1,
-      f'all three decompressors have the same context size: {ctxsize}')
+# There is no context block: the whole state is the caller's registers, so no
+# decoder may name a5 or a context field at all, and nothing may promise one.
+for f in FILES:
+    src = (K68 / f).read_text()
+    body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
+    check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
+    check('ctx_' not in body, f'{f}: no context field left')
+    check('tst.b   d4' in body, f'{f}: the entry dispatches on the state register')
+    check('d4  op state' in src, f'{f}: the header maps the state register')
+check(not re.search(r'\d+-byte word-aligned context', readme),
+      'README promises no context block')
 
 # 13. the operation-length contract, stated identically in all three headers and
 #     backed by 68k/test/emu/boundaries.py
