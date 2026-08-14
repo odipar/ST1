@@ -6,8 +6,8 @@ byte-identical output to the original C implementation — checked on every run 
 [c/zx1/src](c/zx1/src) and compares against it in
 [both directions](#compatibility-with-zx1).
 
-**Latest release: [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2)** — the three
-assembled 68000 decompressors are attached to it (298, 300 and 288 bytes).
+**Latest release: [v0.3](https://github.com/odipar/jx1/releases/tag/v0.3)** — the three
+assembled 68000 decompressors are attached to it (290, 290 and 272 bytes).
 
 Additions/differences to the original:
 
@@ -323,6 +323,7 @@ See [c/zx1/src](c/zx1/src) for the original source code
 
 | | |
 |---|---|
+| [v0.3](https://github.com/odipar/jx1/releases/tag/v0.3) | An external audit's six findings, acted on. The headline one is a compatibility defect at the project boundary: the compressor could emit an operation longer than the 68000 decoders' 16-bit length, so 70000 identical bytes decoded to 4464 with no error. `jx1 -l65535` splits an over-long match instead, leaving the parse untouched. The real limit turned out to be 65535, twice what the sources assumed, now pinned by hand-authored boundary streams. All three decompressors shrink — 290, 290 and 272 bytes — and `jx1_decompress` gains +4.2–16.3% from a word-sized private budget. The rings hand the write pointer back to the caller, dropping their context to 12 bytes. The test suite is the other half: it assembles fresh every run, cannot report success while failing, checks its own documentation, and now verifies jx1 against the original C implementation built from `c/zx1/src` — including the 68000 decoders reading a C-produced stream. |
 | [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2) | The ring buffer arrives on the 68000, in two forms and at no cost in context — `jx1_68000_ring.S` (300 B) for any buffer and chunk size, `jx1_68000_ring_mod.S` (288 B) when the chunk divides the buffer. The linear decompressor drops to 298 bytes, +32–36% over the reference port. A partial-register hazard in both ring decoders is fixed — the ABI declares `d0-d5` clobbered, so their *incoming* upper words are caller junk, and two clamps compared them long — and both harnesses now poison those registers before every call, with `run.sh` failing the command on any `BAD`. |
 | [v0.1](https://github.com/odipar/jx1/releases/tag/v0.1) | First release: the Java port with `Jx1`/`Djx1`, custom buffer sizes, the incremental ring buffer and resumable decompression, plus the 68000 decompressor chosen from an 18-variant campaign and validated on real hardware timing. |
 
