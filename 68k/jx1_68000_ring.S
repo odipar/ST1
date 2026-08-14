@@ -88,31 +88,30 @@
 ;   1. no single literal run or match is longer than 65535 bytes - the
 ;      length lives in a word. Compress with jx1 -l65535, which splits any
 ;      longer match; a plain stream can exceed it and would decode short here
-;   2. the chunk size is 1..127
+;   2. the budget d5.w is 1..65535 - a call emits at most that many
+;      bytes. It is a parameter, not state: pass it on every call
 ;   3. the ring buffer size N is 1..65535. The format's offsets stop at
 ;      32512, so a larger ring could never be referenced anyway
 ;   4. no back-reference offset exceeds the ring buffer size N
 ;
-; The context must be word-aligned and is 12 bytes.
+; There is no context block: a0/a1/d2/d3/d4 ARE the state, and a resume loop
+; simply leaves them alone between calls.
 ;
-; Calling convention: jx1_init and jx1_resume clobber d0-d5/a0/a2 and leave
-; a5 = context and the ring bounds a3/a4 untouched; a1 is the caller's write
-; pointer, taken in and handed back. (d4 carries the op
-; state.) d6/d7 and a6 are never touched.
+; Calling convention: a0/a1/d2/d3/d4 in and out, d5.w the budget in, a3/a4 the
+; ring bounds in and unchanged; d0 = the return code; d1 and a2 are scratch.
+; Everything else - d6/d7, a5, a6 - is untouched.
 ; -----------------------------------------------------------------------------
 
-; Context block (Java: Decompressor's fields). The write pointer is NOT here:
-; like the ring bounds, the caller holds it. The three longwords are in movem
-; order d3,a0,a2.
-ctx_packed      equ     0               ; .l  d3: lastOffset (high word), remaining (low word)
-ctx_src         equ     4               ; .l  a0: input position
-ctx_chunk       equ     8               ; .w  chunkSize (X), 1..127 (a word: the
-                                        ;     budget is only ever used word-wide,
-                                        ;     so the entry loads it as one)
-ctx_bits        equ     10              ; .b  bit buffer
-ctx_state       equ     11              ; .b  State: $80 START, 0 LITERALS,
-ctx_size        equ     12              ;     2 MATCH, $FF DONE - signed, so the
-                                        ;     entry dispatches on the load's flags
+; The decompressor's whole state lives in the caller's registers - there is no
+; context block at all. Across a resume loop the caller leaves these alone;
+; jx1_init sets the three that are not pointers.
+;
+;   a0  input position
+;   a1  write pointer
+;   d2  bit queue ($80 is the sentinel; only the low byte is used)
+;   d3  lastOffset (high word) | remaining (low word)
+;   d4  op state: $80 START, 0 LITERALS, 2 MATCH, $FF DONE - signed, so the
+;       entry dispatches on the flags a tst.b already sets (low byte only)
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
 ; There is no one-shot entry: a bounded buffer has to be drained by the
@@ -121,33 +120,31 @@ ctx_size        equ     12              ;     2 MATCH, $FF DONE - signed, so the
                 bra.w   jx1_resume
 
 ; -----------------------------------------------------------------------------
-; jx1_init: a0 = compressed data, a1 = ring buffer, d0.w = chunk size 1..127,
-;           a5 = word-aligned context block of ctx_size bytes.
-; Java: the Decompressor constructor / reset().
+; jx1_init: a0 = compressed data, a1 = ring buffer.
+; Java: the Decompressor constructor / reset(). Seeds d2/d3/d4, the three
+; state registers that are not pointers; writes nothing to memory.
 ; -----------------------------------------------------------------------------
 jx1_init:
         moveq   #1,d3
         swap    d3                      ; lastOffset = INITIAL_OFFSET, remaining = 0
-        swap    d0                      ; the last longword is the chunk word,
-        move.w  #$8080,d0               ; an empty bit buffer and State.START,
-        movea.l d0,a2                   ; so the whole context is three registers
-        movem.l d3/a0/a2,(a5)           ; in movem order and one store
+        moveq   #-128,d2                ; an empty bit queue: $80 is the sentinel
+        move.b  d2,d4                   ; State.START, which is the same $80
         rts
 
 entry_special:                          ; the negative states, both rare
         add.b   d4,d4                   ; START ($80) doubles to zero; DONE
         beq.w   begin_literals          ; ($FF) does not, so it falls through
 entry_done:
-        lea     -ctx_state(a5),a5       ; keep returning "fully processed"
-        moveq   #0,d0
+        moveq   #0,d0                   ; keep returning "fully processed"
         rts
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a5 = context, a1 = write pointer, a3 = ring buffer start,
+; jx1_resume: a0/a1/d2/d3/d4 = the state, d5.w = this call's budget,
+;             a3 = ring buffer start,
 ;             a4 = ring buffer end (start + N). a3/a4 are read-only and come
 ;             back unchanged; a1 is IN and OUT - the caller keeps it across
 ;             calls, exactly as it keeps the bounds.
-; Emits at most ctx_chunk output bytes, and at most as many as fit before the
+; Emits at most d5 output bytes, and at most as many as fit before the
 ; end of the ring buffer. Returns d0 = 0 when the stream is fully processed,
 ; 1 when there is more; a1 = the write pointer, which is the caller's cue:
 ; everything between its previous value and a1 is new output, and when a1
@@ -156,10 +153,6 @@ entry_done:
 ; Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 jx1_resume:
-        movem.l (a5)+,d3/a0             ; packed offset/remaining, src; a1 is
-                                        ; the caller's, like a3/a4
-        move.w  (a5)+,d5                ; budget = chunkSize
-        move.b  (a5)+,d2                ; bit buffer; a5 now parked on ctx_state
         move.l  a4,d1
         sub.l   a1,d1                   ; room before the end of the buffer
         bne.s   have_room
@@ -174,7 +167,7 @@ budget_set:                             ; exactly as the budget runs out. Word:
                                         ; the room is at most N <= 65535, so
                                         ; this cannot read the caller's junk in
                                         ; the upper words of d1 or d5
-        move.b  (a5),d4                 ; op state (Java: switch in next()) -
+        tst.b   d4                      ; op state (Java: switch in next()) -
         bmi.s   entry_special           ; START and DONE are the negative ones;
                                         ; a mid-op resume falls straight into
                                         ; the segment body, because a suspend
@@ -246,12 +239,9 @@ resume_op:                              ; the loop guards live here, below the
                                         ; one that costs nothing to reach
 
 suspend_more:                           ; Java: resume() returning true
-        move.b  d4,(a5)                 ; the interrupted op's state, verbatim
-        move.b  d2,-(a5)                ; bit buffer
-        subq.l  #2,a5                   ; skip the chunk word
-        movem.l d3/a0,-(a5)          ; stores in layout order, a5 = context base
-        moveq   #1,d0                   ; more output pending: call again
-        rts
+        moveq   #1,d0                   ; more output pending: call again. The
+        rts                             ; state is already where it lives - in
+                                        ; the caller's registers
 
 
 ; get_gamma: interlaced Elias gamma value in d1.w (assumption: fits a word).
@@ -338,7 +328,6 @@ literals_transition:
         bra.s   resume_op               ; (.w: same, zero cycle cost)
 
 end_marker:                             ; Java: State.DONE - the caller drains
-        st      (a5)                    ; State.DONE, which is authoritative:
-        lea     -ctx_state(a5),a5       ; every other field is dead now, so walk
-        moveq   #0,d0                   ; a5 back rather than store them
+        st      d4                      ; State.DONE; the end of the output is
+        moveq   #0,d0                   ; in a1, as after any other call
         rts

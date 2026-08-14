@@ -31,10 +31,10 @@ from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, 
                                 UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
                                 UC_M68K_REG_D4, UC_M68K_REG_D5,
                                 UC_M68K_REG_A6, UC_M68K_REG_D6, UC_M68K_REG_D7)
-CLOBBERED = (UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2,
-             UC_M68K_REG_D3, UC_M68K_REG_D4, UC_M68K_REG_D5)
+# What a caller may still pass junk in. d2/d3/d4 carry the parse state and
+# d5 is the budget, so the clobber set is what is left.
+CLOBBERED = (UC_M68K_REG_D0, UC_M68K_REG_D1)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
-CTX_BYTES = t.context_size(POS[0] if POS else 'jx1_68000_ring.bin')
 # jx1_68000_ring.S wraps a full buffer itself at the next entry; ring_mod
 # requires the caller to. Both are legal callers of the general ring, and only
 # the caller-wrapped one exercises ring_mod - so the general ring is run both
@@ -50,8 +50,9 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         # The whole [addr, addr+size) interval, against exact regions: a write
         # that starts inside the ring and ends past it is still a write past it,
         # and the context is ctx_size bytes, not a comfortable 64.
-        for lo, hi in ((ring, ring + n), (t.CTX, t.CTX + CTX_BYTES),
-                       (t.STACK_TOP - 0x4000, t.STACK_TOP)):
+        # There is no context block any more, so the ring and the stack are
+        # the only places a write may land at all.
+        for lo, hi in ((ring, ring + n), (t.STACK_TOP - 0x4000, t.STACK_TOP)):
             if lo <= addr and addr + size <= hi:
                 return
         stray.append((addr, size))
@@ -60,8 +61,6 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     read_high = t.track_source_reads(uc, t.SRC)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
-    uc.reg_write(UC_M68K_REG_D0, chunk)
-    uc.reg_write(UC_M68K_REG_A5, t.CTX)
     t.call(uc, ENTRY_INIT)
     uc.reg_write(UC_M68K_REG_A3, ring)              # ring bounds are parameters
     uc.reg_write(UC_M68K_REG_A4, ring + n)
@@ -76,7 +75,8 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         assert calls < 20 + 4 * (len(expected) // max(1, min(chunk, n)) + 1), 'runaway'
         for reg in CLOBBERED:               # the ABI calls these clobbered, so
             uc.reg_write(reg, 0xBEEF0000)   # a caller may pass anything in them
-        r = t.call(uc, ENTRY_RESUME)
+        uc.reg_write(UC_M68K_REG_D5, chunk)     # the budget is a per-call
+        r = t.call(uc, ENTRY_RESUME)            # parameter, not state
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         assert dst >= prev, f'write pointer went backwards inside a call: {dst} < {prev}'
         out += uc.mem_read(prev, dst - prev)
@@ -106,7 +106,8 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
 def main():
     sizes = [(1024, 16), (1024, 127), (4096, 16), (4096, 100), (32512, 16),
              (32512, 127), (256, 16), (256, 127), (512, 64), (511, 16),
-             (511, 7), (1000, 127), (33000, 16), (3, 1), (2, 1), (1, 1)]
+             (511, 7), (1000, 127), (33000, 16), (3, 1), (2, 1), (1, 1),
+             (32512, 32512), (4096, 4096), (32512, 255)]   # budgets past 127
     failures = 0
     for name, data, m in t.testcases():
         for n, chunk in sizes:
