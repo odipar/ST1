@@ -147,7 +147,19 @@ for f in FILES:
 check('MAX_OP = 65535' in (K68 / 'test' / 'emu' / 'boundaries.py').read_text(),
       'boundaries.py pins the same operation limit')
 
-# 14. the trusted-input boundary is stated where a caller will see it
+# 14. the compatibility check exists, is documented, and uses the repo's C sources
+compat = (K68 / 'test' / 'emu' / 'compat.py').read_text()
+check("REPO / 'c' / 'zx1' / 'src'" in compat.replace('CSRC = ', ''),
+      'compat.py builds the C reference from the repository sources')
+check('compat.py' in readme and 'Compatibility with ZX1' in readme,
+      'README documents the compatibility check')
+emu_readme = (K68 / 'test' / 'emu' / 'README.md').read_text()
+check('compat.py' in emu_readme, 'the emulator README lists compat.py')
+scripts = sorted(f.name for f in (K68 / 'test' / 'emu').glob('*.py'))
+missing = [f for f in scripts if f not in emu_readme]
+check(not missing, f'every emulator script is listed in its README (missing {missing})')
+
+# 15. the trusted-input boundary is stated where a caller will see it
 for f in FILES:
     check('TRUSTED INPUT ONLY' in (K68 / f).read_text(), f'{f}: states trusted-input-only')
 check('### Trusted input only' in readme, 'README has the trusted-input section')

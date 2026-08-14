@@ -1,8 +1,10 @@
 # jx1 — the Java version of ZX1
 
 A Java port of [ZX1](https://github.com/einar-saukas/ZX1) v1.5 by Einar Saukas, producing
-byte-identical output to the original C implementation (verified by extensive differential
-testing against the C binaries, including custom offset limits).
+byte-identical output to the original C implementation — checked on every run by
+[68k/test/emu/compat.py](68k/test/emu/compat.py), which builds the C reference from
+[c/zx1/src](c/zx1/src) and compares against it in
+[both directions](#compatibility-with-zx1).
 
 **Latest release: [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2)** — the three
 assembled 68000 decompressors are attached to it (298, 300 and 288 bytes).
@@ -28,6 +30,32 @@ Additions/differences to the original:
   `Decompressor` state machine, in a linear and two ring-buffer forms, verified
   byte-identical against Java-compressed streams under cycle-measured emulation and
   on real 68000 hardware timing (Atari ST)
+
+## Compatibility with ZX1
+
+jx1 is a port, not a fork of the format: a jx1 stream is a ZX1 stream and vice
+versa. [68k/test/emu/compat.py](68k/test/emu/compat.py) builds `zx1` and `dzx1`
+from this repository's own copy of the C sources — so the reference is Einar
+Saukas' implementation, freshly compiled, not a stored fixture — and asks four
+questions:
+
+| | check | scope |
+|---|---|---|
+| 1 | jx1's output equals the C compressor's, byte for byte | 11 corpora × default, `-b`, `-q` |
+| 2 | jx1 decompresses what C compresses | 11 streams |
+| 3 | C decompresses what jx1 compresses | 11 corpora × 6 option sets, including `-mN` and `-lN` |
+| 4 | the **68000** decoders decode a C-produced stream | 44 decodes across all three |
+
+The fourth is the one that cannot be faked. Everything else checks jx1 against
+jx1, where a shared misunderstanding of the format would pass unnoticed; there
+the reference is somebody else's code.
+
+Question 3 covers the two options C does not have. `-mN` and `-lN` change
+*which parse is chosen*, never the encoding, so what comes out is ordinary ZX1
+— which is why `dzx1` reads all of it. The one place the two compressors
+legitimately differ is `-l65535` on input with a very long match: C emits one
+69999-byte match where jx1 emits two, so C's stream is smaller and jx1's is
+safe on a 68000. Both are valid, and both decode to the same bytes.
 
 ## The 68k decompressors
 
