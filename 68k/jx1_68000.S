@@ -10,12 +10,27 @@
 ;
 ; A resumable port of the Java Decompressor state machine: jx1_resume
 ; emits at most one chunk of output per call and picks up mid-op where it
-; left off. 324 bytes, one body, no macros, no tables, no self-modifying
+; left off. 290 bytes, one body, no macros, no tables, no self-modifying
 ; code; runs from ROM, any number of concurrent contexts.
+;
+;
+; Once a stream is finished the context holds only its state byte: the final
+; call stops writing the other fields back, because nothing reads them again.
+; A finished stream keeps returning 0, and the end of the output is in a1.
+; TRUSTED INPUT ONLY. Nothing here is validated: not the stream, not the end
+; of the input, not the destination, not the parameters. A malformed or
+; hostile stream can read and write arbitrary memory, an offset beyond the
+; history produced so far reads whatever is there, and a chunk size of zero
+; never advances an operation, so a caller's drain loop spins forever. That is
+; the deliberate price of a decompressor this size. For data you did not
+; produce yourself, validate the stream and its decompressed length before
+; calling in, or decompress it somewhere it cannot do harm.
 ;
 ; Assumptions, undefined when violated:
 ;
-;   1. no single literal run or match is longer than 32768 bytes
+;   1. no single literal run or match is longer than 65535 bytes - the
+;      length lives in a word. Compress with jx1 -l65535 to guarantee it;
+;      an unconstrained stream can exceed it and would decode short here
 ;   2. the chunk size is 1..127
 ;
 ; The context must be word-aligned and is 16 bytes.
@@ -67,7 +82,10 @@ jx1_decompress:
         move.l  a5,-(sp)
         lea     -ctx_size(sp),sp
         movea.l sp,a5
-        moveq   #127,d0                 ; largest chunk a byte allows
+        moveq   #-1,d0                  ; private budget = 65535: the chunk is a
+                                        ; word field, and a one-shot has no reason
+                                        ; to hand control back. Same two bytes, but
+                                        ; a 32K output is one call, not 252
         bsr.s   jx1_init
 .drain:
         bsr.s   jx1_resume              ; Java: while (resume()) {}
@@ -83,9 +101,8 @@ jx1_decompress:
 ; a1 = current end of output. Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 entry_special:                          ; the negative states, both rare
-        addq.b  #1,d4                   ; DONE ($FF) becomes zero
-        beq.s   entry_done
-        bra.s   begin_literals          ; START: the stream opens with literals
+        add.b   d4,d4                   ; START ($80) doubles to zero; DONE
+        beq.s   begin_literals          ; ($FF) does not, so it falls through
 entry_done:
         lea     -ctx_state(a5),a5       ; keep returning "fully processed"
         moveq   #0,d0
@@ -111,23 +128,22 @@ jx1_resume:
 ; Java: readInterlacedEliasGamma().
 get_gamma:
         moveq   #1,d1
-        add.b   d2,d2                   ; first continuation bit (refill site)
-        bne.s   gamma_first
-        move.b  (a0)+,d2                ; refill; bit groups always open on a
-        addx.b  d2,d2                   ; continuation bit (see the note above)
-gamma_first:
-        bcc.s   gamma_done              ; 0: value is 1, straight through
-gamma_loop:
+        add.b   d2,d2                   ; first continuation bit
+        beq.s   gamma_refill            ; the queue empties on one bit in eight,
+        bcc.s   gamma_done              ; so the refill is out of line and this
+gamma_loop:                             ; branch is the one normally not taken
         add.b   d2,d2                   ; data bit: never a refill
-        addx.w  d1,d1                   ; value = value*2 + data bit
-        add.b   d2,d2                   ; next continuation bit (refill site)
-        bne.s   gamma_have
-        move.b  (a0)+,d2
-        addx.b  d2,d2
-gamma_have:
+        addx.w  d1,d1                   ; value = value*2 + bit
+        add.b   d2,d2                   ; continuation bit
+        beq.s   gamma_refill
         bcs.s   gamma_loop              ; 1: another pair; the continue branch
 gamma_done:                             ; doubles as the loop jump
         rts
+gamma_refill:                           ; both sites want the same thing of a
+        move.b  (a0)+,d2                ; refilled queue - carry set means
+        addx.b  d2,d2                   ; another pair follows - so they share
+        bcs.s   gamma_loop              ; one block, and duplicating this tail
+        rts                             ; costs nothing over branching back
 
 begin_literals:                         ; Java: beginLiterals()
         moveq   #0,d4                   ; State.LITERALS
@@ -184,7 +200,6 @@ copied:
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
-        moveq   #2,d4                   ; State.MATCH
         move.b  (a0)+,d3                ; d3.w is already zero: every edge here
                                         ; has just completed an op, and the
                                         ; stale high word is overwritten by the
@@ -214,9 +229,15 @@ got_offset:
                                         ; costs 10 cycles at either width)
 
 literals_transition:
+        moveq   #2,d4                   ; State.MATCH: both successors of a
+                                        ; literal run are matches, and the
+                                        ; assignment has to precede the bare
+                                        ; read below - a moveq between the add
+                                        ; and the bcs would destroy the carry.
+                                        ; (A match reaching new_offset already
+                                        ; holds 2, so that path needs none.)
         add.b   d2,d2                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
-        moveq   #2,d4                   ; 0: State.MATCH from last offset
         bsr.w   get_gamma               ; Java: beginMatchFromLastOffset() (.w: same)
         move.w  d1,d3                   ; remaining = gamma; lastOffset untouched
         bra.w   resume_op               ; (.w: same, zero cycle cost)
@@ -230,9 +251,7 @@ suspend:                                ; Java: resume() returning true
         rts
 
 end_marker:                             ; Java: State.DONE (no final flip needed:
-        st      (a5)                    ; State.DONE (output is already in place)
-        move.b  d2,-(a5)
-        subq.l  #2,a5
-        movem.l d3/a0-a1,-(a5)
-        moveq   #0,d0                   ; fully processed
-        rts
+        st      (a5)                    ; State.DONE, which is authoritative:
+        lea     -ctx_state(a5),a5       ; every other field is dead now, so walk
+        moveq   #0,d0                   ; a5 back rather than store them. The
+        rts                             ; end of the output is in a1, as always

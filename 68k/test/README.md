@@ -129,35 +129,35 @@ size X.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
-| text | 28 | 360 | 16 | 14660 | 16000 | +9.1% |
-| text | 28 | 360 | 127 | 8196 | 8800 | +7.4% |
-| wordsoup | 818 | 2925 | 16 | 216648 | 233333 | +7.7% |
-| wordsoup | 818 | 2925 | 127 | 168646 | 180000 | +6.7% |
-| farmatch | 212 | 2900 | 16 | 98976 | 106667 | +7.8% |
-| farmatch | 212 | 2900 | 127 | 47466 | 50000 | +5.3% |
-| period129 | 138 | 1032 | 16 | 36368 | 39400 | +8.3% |
-| period129 | 138 | 1032 | 127 | 18286 | 19400 | +6.1% |
-| allsame | 6 | 1000 | 16 | 34536 | 37400 | +8.3% |
-| allsame | 6 | 1000 | 127 | 16656 | 17600 | +5.7% |
-| rle32k | 7 | 32000 | 16 | 1073044 | 1160000 | +8.1% |
-| rle32k | 7 | 32000 | 127 | 504502 | 526667 | +4.4% |
-| maxoffset | 32589 | 33012 | 16 | 1101916 | 1193333 | +8.3% |
-| maxoffset | 32589 | 33012 | 127 | 544112 | 566667 | +4.1% |
+| text | 28 | 360 | 16 | 15134 | 15900 | +5.1% |
+| text | 28 | 360 | 127 | 8190 | 8700 | +6.2% |
+| wordsoup | 818 | 2925 | 16 | 219046 | 229333 | +4.7% |
+| wordsoup | 818 | 2925 | 127 | 167228 | 177333 | +6.0% |
+| farmatch | 212 | 2900 | 16 | 103264 | 106667 | +3.3% |
+| farmatch | 212 | 2900 | 127 | 47938 | 49333 | +2.9% |
+| period129 | 138 | 1032 | 16 | 37860 | 39400 | +4.1% |
+| period129 | 138 | 1032 | 127 | 18434 | 19200 | +4.2% |
+| allsame | 6 | 1000 | 16 | 35982 | 37400 | +3.9% |
+| allsame | 6 | 1000 | 127 | 16782 | 17400 | +3.7% |
+| rle32k | 7 | 32000 | 16 | 1120972 | 1160000 | +3.5% |
+| rle32k | 7 | 32000 | 127 | 510478 | 526667 | +3.2% |
+| maxoffset | 32589 | 33012 | 16 | 1151056 | 1193333 | +3.7% |
+| maxoffset | 32589 | 33012 | 127 | 549956 | 566667 | +3.0% |
 
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
 several times the buffer it streams through — lands in the same band,
-**+6.4% to +7.7%** over its model (mean +7.0%):
+**+3.4% to +6.2%** over its model (mean +4.3%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 16438 | 17700 | +7.7% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 264524 | 284000 | +7.4% |
-| farmatch | 410 | 2900 | 1024 | 16 | 110600 | 118000 | +6.7% |
-| period129 | 138 | 1032 | 1024 | 16 | 40634 | 43600 | +7.3% |
-| allsame | 6 | 1000 | 1024 | 16 | 38868 | 41600 | +7.0% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1216098 | 1293333 | +6.4% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1197596 | 1280000 | +6.9% |
+| text | 28 | 360 | 1024 | 16 | 16636 | 17500 | +5.2% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 262436 | 278667 | +6.2% |
+| farmatch | 410 | 2900 | 1024 | 16 | 113038 | 117333 | +3.8% |
+| period129 | 138 | 1032 | 1024 | 16 | 41446 | 43200 | +4.2% |
+| allsame | 6 | 1000 | 1024 | 16 | 39670 | 41200 | +3.9% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1243764 | 1286667 | +3.4% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1224660 | 1266667 | +3.4% |
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
 spends that on a cheaper entry, on the same shape. Its model column includes
@@ -166,51 +166,65 @@ decoder does not wrap for you and the timed loop therefore executes it:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 15932 | 17100 | +7.3% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 260510 | 280000 | +7.5% |
-| farmatch | 410 | 2900 | 1024 | 16 | 106608 | 113333 | +6.3% |
-| period129 | 138 | 1032 | 1024 | 16 | 39210 | 42000 | +7.1% |
-| allsame | 6 | 1000 | 1024 | 16 | 37482 | 40000 | +6.7% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1172284 | 1246667 | +6.3% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1152380 | 1226667 | +6.4% |
+| text | 28 | 360 | 1024 | 16 | 16130 | 16900 | +4.8% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 258422 | 273333 | +5.8% |
+| farmatch | 410 | 2900 | 1024 | 16 | 109046 | 112667 | +3.3% |
+| period129 | 138 | 1032 | 1024 | 16 | 40022 | 41600 | +3.9% |
+| allsame | 6 | 1000 | 1024 | 16 | 38284 | 39600 | +3.4% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1199950 | 1240000 | +3.3% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1179444 | 1220000 | +3.4% |
 
-Same band (+6.3% to +7.5%, mean +6.8%). Side by side, in raw ticks:
+Same band (+3.3% to +5.8%, mean +4.0%). Side by side, in raw ticks:
 
 | corpus | ring | ring_mod | ring_mod gain |
 |---|---|---|---|
-| text | 177 | 171 | +3.4% |
-| wordsoup | 213 | 210 | +1.4% |
-| farmatch | 177 | 170 | +4.0% |
-| period129 | 218 | 210 | +3.7% |
-| allsame | 208 | 200 | +3.8% |
-| rle32k | 194 | 187 | +3.6% |
-| maxoffset | 192 | 184 | +4.2% |
+| text | 175 | 169 | +3.4% |
+| wordsoup | 209 | 205 | +1.9% |
+| farmatch | 176 | 169 | +4.0% |
+| period129 | 216 | 208 | +3.7% |
+| allsame | 206 | 198 | +3.9% |
+| rle32k | 193 | 186 | +3.6% |
+| maxoffset | 190 | 183 | +3.7% |
 
 (ticks, ring 1024, chunk 16, same corpora and calibration.) Both files carry
 the same entry optimisations, so the last column is the divisibility
-requirement alone — measured **+1.4% to +4.2%**, against the +1.5% to +3.8%
+requirement alone — measured **+1.9% to +4.0%**, against the +1.5% to +3.7%
 the cycle model predicts for it, and with the caller's wrap on ring_mod's
 side of the ledger.
 
-These tables also **confirm an optimisation on hardware independently of the
-model**. Handing the write pointer to the caller — a1 in and out, instead of
-a context field reloaded and stored every call — was predicted to be worth
-about 1–4%. Measured on the same shape, the ticks fell from
-181/216/181/223/213/199/197 to 177/213/177/218/208/194/192 for the ring
-(**+1.4% to +2.5%**) and from 175/212/175/215/205/192/189 to
-171/210/170/210/200/187/184 for ring_mod (**+0.9% to +2.9%**), while the
-context shrank from 16 to 12 bytes.
+These tables also **measure optimisation work on hardware rather than
+predicting it**, which is worth doing precisely because the honest answer is
+often small. The audit-driven round — START dispatched by doubling the state,
+the suspend path made the fallthrough, one State.MATCH assignment instead of
+two, a dead save dropped at DONE, and the gamma refill moved out of line —
+took 8 to 10 bytes off each decoder and measured, on the same corpora and
+calibration:
 
-**The model holds.** Real ST decode time runs **+4.1% to +9.1%** above the
-idealized 68000 cycle counts (mean +7.0%) — the gap is interrupt service and
+| | before | after | gain |
+|---|---|---|---|
+| linear, X=16 | 160/175/160/197/187/174/179 | 159/172/160/197/187/174/179 | +0.0% to +1.7% |
+| linear, X=127 | 88/135/75/97/88/79/85 | 87/133/74/96/87/79/85 | +0.0% to +1.5% |
+| ring 1024/16 | 177/213/177/218/208/194/192 | 175/209/176/216/206/193/190 | +0.5% to +1.9% |
+| ring_mod 1024/16 | 171/210/170/210/200/187/184 | 169/205/169/208/198/186/183 | +0.5% to +2.4% |
+
+About **1% on the resumable path** — several rows sit inside the ±1 tick
+resolution — for a change set whose real return was 8–10 bytes each and a
+correctness fix. The exception is `jx1_decompress`, which no longer hands
+control back 251 times it never needed to: its private budget is now 65535
+rather than 127, the same two bytes, worth **+4.2% to +16.3%** (mean +12.4%)
+under the model. The resumable entry is unchanged, so the timed rows above do
+not show it.
+
+**The model holds.** Real ST decode time runs **+2.9% to +6.2%** above the
+idealized 68000 cycle counts (mean +4.1%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
 reference `dbf` loop, whose cycle count is exact by construction, measures
 **+22.6%** over its ideal on the same machine, and a `move.b (a0)+,(a1)+` loop
 +12.0%: the decompressor loses *less* to the machine than either reference.
 
 The model's *relative* predictions — the thing optimization decisions were
-actually made on — hold within **1.6–4.8%**: predicted chunk-16 / chunk-127
-ratios of 1.30–2.21 against 1.32–2.31 measured.
+actually made on — hold within **1.3%**: predicted chunk-16 / chunk-127
+ratios of 1.31–2.20 against 1.29–2.20 measured.
 
 Measurement resolution is ±1 tick, i.e. 0.4–1.3% per figure; the calibration
 loop itself lands on 240 or 241 ticks depending on where the program's code

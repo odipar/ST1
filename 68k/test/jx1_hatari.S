@@ -152,7 +152,10 @@ t_resume:
         lea     m_eq,a0
         bsr     puts
         bsr     run_resume_poison
-        move.l  ctx+8,d0                        ; ctx_dst = current output end
+        move.l  a1,d0                           ; a1 = the end of the output. The
+                                                ; context field is not written on
+                                                ; the final call: once the state
+                                                ; byte says DONE the rest is dead
         sub.l   #dst_buf,d0
         lea     dst_buf,a0
         bra     verify

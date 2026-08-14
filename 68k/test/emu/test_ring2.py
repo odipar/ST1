@@ -30,21 +30,29 @@ from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, 
                                 UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_D0,
                                 UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
                                 UC_M68K_REG_D4, UC_M68K_REG_D5,
-                                UC_M68K_REG_D6, UC_M68K_REG_D7)
+                                UC_M68K_REG_A6, UC_M68K_REG_D6, UC_M68K_REG_D7)
 CLOBBERED = (UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2,
              UC_M68K_REG_D3, UC_M68K_REG_D4, UC_M68K_REG_D5)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
-CTX_DST = 8
+CTX_BYTES = t.context_size(POS[0] if POS else 'jx1_68000_ring_mod.bin')
 
 def run_ring(compressed, expected, n, chunk, ring):
     uc = t.make_emu(compressed)
-    uc.mem_write(ring, b'\xAA' * (n + 64))
-    stray = []
-    uc.hook_add(UC_HOOK_MEM_WRITE,
-                lambda u, ty, addr, size, val, d:
-                    stray.append(addr) if not (ring <= addr < ring + n
-                                               or t.CTX <= addr < t.CTX + 64
-                                               or addr >= t.STACK_TOP - 0x4000) else None)
+    uc.mem_write(ring - 8, b'\xAA' * (n + 16))      # canaries either side of the
+    stray = []                                      # ring, checked at the end
+
+    def guard(u, ty, addr, size, val, d):
+        # The whole [addr, addr+size) interval, against exact regions: a write
+        # that starts inside the ring and ends past it is still a write past it,
+        # and the context is ctx_size bytes, not a comfortable 64.
+        for lo, hi in ((ring, ring + n), (t.CTX, t.CTX + CTX_BYTES),
+                       (t.STACK_TOP - 0x4000, t.STACK_TOP)):
+            if lo <= addr and addr + size <= hi:
+                return
+        stray.append((addr, size))
+
+    uc.hook_add(UC_HOOK_MEM_WRITE, guard)
+    read_high = t.track_source_reads(uc, t.SRC)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
     uc.reg_write(UC_M68K_REG_D0, chunk)
@@ -54,6 +62,7 @@ def run_ring(compressed, expected, n, chunk, ring):
     uc.reg_write(UC_M68K_REG_A4, ring + n)
     uc.reg_write(UC_M68K_REG_D6, 0xDEADBEEF)
     uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
+    uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
 
     out = bytearray()
     prev, calls = ring, 0
@@ -80,6 +89,12 @@ def run_ring(compressed, expected, n, chunk, ring):
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
     assert uc.reg_read(UC_M68K_REG_D6) == 0xDEADBEEF, 'd6 clobbered'
     assert uc.reg_read(UC_M68K_REG_D7) == 0xFEEDFACE, 'd7 clobbered'
+    assert uc.reg_read(UC_M68K_REG_A6) == 0xCAFEBABE, 'a6 clobbered'
+    consumed = read_high[0] - t.SRC          # every byte of the stream, and
+    assert consumed == len(compressed), (     # not one byte past it
+        f'read {consumed} of {len(compressed)} input bytes')
+    assert bytes(uc.mem_read(ring - 8, 8)) == b'\xAA' * 8, 'wrote before the ring'
+    assert bytes(uc.mem_read(ring + n, 8)) == b'\xAA' * 8, 'wrote past the ring'
     return bytes(out)
 
 def main():
@@ -96,7 +111,8 @@ def main():
                 continue
             compressed = t.java_compress(data, min(n, 32512))
             try:
-                out = run_ring(compressed, data, n, chunk, t.DST + 3)   # odd base
+                out = run_ring(compressed, data, n, chunk, t.DST + 11)  # odd base,
+                                       # clear of the canary below it
                 assert out == data, (f'{len(out)} bytes, first diff at '
                                      f'{next((i for i, (a, b) in enumerate(zip(out, data)) if a != b), len(out))}')
             except Exception as e:
