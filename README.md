@@ -73,12 +73,18 @@ yourself at build time. For data you did not produce, validate the stream and
 its decompressed length before calling in — the Java `Decompressor` runs its
 checks under `-ea` — or decompress somewhere it cannot do harm.
 
-One contract is easy to violate by accident: **no single literal run or match
-may exceed 65535 bytes**, because the length lives in a word. A plain `jx1`
-stream can exceed that (70000 identical bytes compress to one 69999-byte
-match), and such a stream decodes *short* on a 68000 with no error. Compress
-with `jx1 -l65535` to rule it out; the flag constrains the parse itself, so
-the result is still optimal subject to the limit.
+One contract is easy to violate by accident: **no single operation may exceed
+65535 bytes**, because the length lives in a word. A plain `jx1` stream can
+exceed that — 70000 identical bytes compress to one 69999-byte match — and
+such a stream decodes *short* on a 68000 with no error at all.
+
+`jx1 -l65535` rules it out. It leaves the parse alone and splits an over-long
+**match** into several at the same offset, costing two or three bytes per
+65535. A **literal** run cannot be split: the format has no way to say "more
+literals", since after a literal run a 0 bit means a match. So if one somehow
+exceeded the limit the compressor would say so rather than fix it — but that
+takes incompressible data on a scale where it does not arise: 500 KB of random
+bytes produces a longest literal run of about 3300.
 
 ### Calling it
 

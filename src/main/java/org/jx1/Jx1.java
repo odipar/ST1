@@ -16,9 +16,9 @@ public final class Jx1 {
     /**
      * The longest operation the 68000 decoders can represent: they hold an
      * operation's remaining length in a word. A stream containing a longer
-     * literal run or match is still valid here and decodes correctly in Java,
-     * but decodes to the wrong length on a 68000, so {@code -l65535} is what
-     * makes a stream safe for them.
+     * operation is still valid here and decodes correctly in Java, but decodes
+     * to the wrong length on a 68000, so {@code -l65535} is what makes a stream
+     * safe for them.
      */
     public static final int MAX_OP_68K = 65535;
 
@@ -78,7 +78,7 @@ public final class Jx1 {
                       -b      Compress backwards
                       -q      Quick non-optimal compression
                       -mN     Limit backreference offsets to N bytes
-                      -lN     Limit any single literal run or match to N bytes
+                      -lN     Split matches so no operation exceeds N bytes
                               (use -l65535 for the 68000 decoders)""");
             return;
         }
@@ -112,16 +112,8 @@ public final class Jx1 {
         }
         int offsetLimit = maxOffset > 0 ? maxOffset
                 : quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
-        Block optimal;
-        try {
-            optimal = Optimizer.optimize(input, skip, offsetLimit, maxOpLength);
-        } catch (IllegalArgumentException e) {
-            // -lN can be unsatisfiable: breaking a literal run needs a match to
-            // put in between, and incompressible input may not offer one.
-            throw Cli.error(e.getMessage() + " (raise -l" + maxOpLength
-                    + ", or raise -m" + offsetLimit + " so more matches are available)");
-        }
-        Compressor.Result result = Compressor.compress(optimal, input, skip, backwardsMode);
+        Compressor.Result result = Compressor.compress(
+                Optimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode, maxOpLength);
         byte[] output = result.output();
         if (backwardsMode) {
             reverse(output);
@@ -138,6 +130,14 @@ public final class Jx1 {
         System.out.printf("File%s compressed%s from %d to %d bytes! (delta %d)%n",
                 skip != 0 ? " partially" : "", backwardsMode ? " backwards" : "",
                 input.length - skip, output.length, result.delta());
+        if (result.longestOp() > maxOpLength) {
+            // Only a literal run can get here - matches are split - and only
+            // from data with no matches to break the run on. The format has no
+            // way to say "more literals", so this is reported, not fixed.
+            System.out.printf("Warning: longest operation is %d bytes, over the -l%d limit: "
+                    + "a literal run, which the format cannot split%n",
+                    result.longestOp(), maxOpLength);
+        }
     }
 
     private static void reverse(byte[] data) {
