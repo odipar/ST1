@@ -11,9 +11,10 @@ from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN
 from unicorn.unicorn_const import UC_CTL_CPU_MODEL, UC_HOOK_MEM_READ
 from unicorn.m68k_const import (
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A3,
-    UC_M68K_REG_A5, UC_M68K_REG_A6,
-    UC_M68K_REG_A7, UC_M68K_REG_D5, UC_M68K_REG_D4, UC_M68K_REG_D3,
-    UC_M68K_REG_D2, UC_M68K_REG_D1,
+    UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_A6,
+    UC_M68K_REG_A7, UC_M68K_REG_D6, UC_M68K_REG_D5, UC_M68K_REG_D4,
+    UC_M68K_REG_D3,
+    UC_M68K_REG_D2, UC_M68K_REG_D1, UC_M68K_REG_D0,
     UC_M68K_REG_D7, UC_M68K_REG_PC,
 )
 
@@ -79,13 +80,16 @@ QUICK = '--quick' in sys.argv     # the whole matrix runs by default: with the
 CODE, CTX, SRC, DST, STACK_TOP, MAGIC = 0x1000, 0x20000, 0x40000, 0x80000, 0xF8000, 0xE0000
 # Registers the calling convention promises to preserve. a5 is here because the
 # decompressors have no context block at all any more - nothing uses it.
-PRESERVED = {UC_M68K_REG_D2: 0xD2D21234,
-             UC_M68K_REG_A2: 0x00020234, UC_M68K_REG_A3: 0x00030234,
-             UC_M68K_REG_A5: 0x00021234, UC_M68K_REG_A6: 0xCAFEBABE,
+PRESERVED = {UC_M68K_REG_D6: 0xD6D61234,
+             UC_M68K_REG_A3: 0x00030234, UC_M68K_REG_A4: 0x00040234,
+             UC_M68K_REG_A5: 0x00050234, UC_M68K_REG_A6: 0xCAFEBABE,
              UC_M68K_REG_D7: 0xFEEDFACE}
-PRESERVED_NAMES = {UC_M68K_REG_D2: 'd2', UC_M68K_REG_A2: 'a2',
-                   UC_M68K_REG_A3: 'a3', UC_M68K_REG_A5: 'a5',
+PRESERVED_NAMES = {UC_M68K_REG_D6: 'd6', UC_M68K_REG_A3: 'a3',
+                   UC_M68K_REG_A4: 'a4', UC_M68K_REG_A5: 'a5',
                    UC_M68K_REG_A6: 'a6', UC_M68K_REG_D7: 'd7'}
+BYTE_STATE_HIGH = 0xA0A0A000
+WORD_STATE_HIGHS = {UC_M68K_REG_D1: 0xA1A10000,
+                    UC_M68K_REG_D2: 0xA2A20000}
 ENTRY_INIT, ENTRY_DECOMPRESS, ENTRY_RESUME = CODE + 0, CODE + 4, CODE + 8
 CTX_SIZE = 22
 
@@ -172,19 +176,46 @@ def call(uc: Uc, entry: int, timeout_insns: int = 200_000_000) -> int:
     assert uc.reg_read(UC_M68K_REG_PC) == MAGIC, 'call did not return'
     return uc.reg_read(UC_M68K_REG_D1) & 0xFFFF
 
+
+def seed_word_state_highs(uc: Uc) -> None:
+    """Exercise every caller-owned state high part for linear/ring_mod."""
+    seed_d0_high(uc)
+    for reg, high in WORD_STATE_HIGHS.items():
+        uc.reg_write(reg, high | (uc.reg_read(reg) & 0xFFFF))
+
+
+def assert_word_state_highs(uc: Uc) -> None:
+    assert_d0_high(uc)
+    for reg, high in WORD_STATE_HIGHS.items():
+        assert uc.reg_read(reg) & 0xFFFF0000 == high, \
+            f'caller-owned {"d1" if reg == UC_M68K_REG_D1 else "d2"}.high changed'
+
+
+def seed_d0_high(uc: Uc) -> None:
+    """Canary the caller-owned upper 24 bits above the d0.b bit queue."""
+    uc.reg_write(UC_M68K_REG_D0,
+                 BYTE_STATE_HIGH | (uc.reg_read(UC_M68K_REG_D0) & 0xFF))
+
+
+def assert_d0_high(uc: Uc) -> None:
+    assert uc.reg_read(UC_M68K_REG_D0) & 0xFFFFFF00 == BYTE_STATE_HIGH, \
+        'caller-owned d0[31:8] changed'
+
 def run_resumable(compressed: bytes, expected: bytes, chunk: int) -> None:
     uc = make_emu(compressed)
     read_high = track_source_reads(uc, SRC)
     uc.reg_write(UC_M68K_REG_A0, SRC)
     uc.reg_write(UC_M68K_REG_A1, DST)
     call(uc, ENTRY_INIT)
+    seed_word_state_highs(uc)
 
     calls, prev_dst = 0, DST
     while True:
         calls += 1
         assert calls <= len(expected) + 2, 'resume loop does not terminate'
-        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
+        uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)  # low word is the budget
         more = call(uc, ENTRY_RESUME)           # parameter now, not state
+        assert_word_state_highs(uc)
         cur_dst = uc.reg_read(UC_M68K_REG_A1)   # a1 is where the interface says
         emitted = cur_dst - prev_dst            # the output ends; the context
                                                 # field is not live after DONE
@@ -199,6 +230,7 @@ def run_resumable(compressed: bytes, expected: bytes, chunk: int) -> None:
     assert calls == max(1, math.ceil(len(expected) / chunk)), \
         f'{calls} calls != ceil({len(expected)}/{chunk})'
     assert call(uc, ENTRY_RESUME) == 0, 'resume after done must stay done'
+    assert_word_state_highs(uc)
     assert read_high[0] - SRC == len(compressed), \
         f'read {read_high[0] - SRC} of {len(compressed)} input bytes'
 

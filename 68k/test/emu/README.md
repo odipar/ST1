@@ -20,7 +20,7 @@ python3 68k/test/emu/align_ring2.py jx1_68000_ring_mod.bin
 python3 68k/test/emu/poison.py jx1_68000.bin linear
 python3 68k/test/emu/poison.py jx1_68000_ring.bin
 python3 68k/test/emu/poison.py jx1_68000_ring_mod.bin
-python3 68k/test/emu/audit.py                 # 113 doc-vs-code claims
+python3 68k/test/emu/audit.py                 # 129 doc-vs-code claims
 python3 68k/test/emu/compat.py                # jx1 vs the original C zx1
 ```
 
@@ -46,15 +46,17 @@ budgets.
 
 ## What they check beyond "the output matches"
 
-* **`poison.py`** checks the register contract from both ends. It fills the
-  decoder-specific scratch registers with junk before every call, since a
-  caller may legally pass anything in them: `d5`/`d6`/`a4` for linear,
-  `d5`/`d6`/`a2` for the general ring, and `d2`/`d5`/`d6` for `ring_mod`.
-  Then it does the converse: it canaries every non-state register before each
-  call and unions the changes over a mixed stream. The observed sets must be
-  exactly those scratch registers plus the spent `d4.w`; a match-only scratch
-  such as `ring_mod`'s `d2` need not change on a literal call, while an
-  untouched register must survive every path.
+* **`poison.py`** checks the common register contract from both ends. All three
+  decoders keep their state in `a0.l`/`a1.l` and `d0.b`/`d1.w`/`d2.w`, take
+  and spend the per-call budget in `d3.w`, and use `d4`/`d5`/`a2` as scratch.
+  The test fills those scratch registers, plus the ignored high word of `d3`,
+  with junk before every call. Then it does the converse: it canaries every
+  non-state register before each call and unions the changes over a mixed
+  stream. The observed set must be exactly `d3`/`d4`/`d5`/`a2`; `d6`/`d7`
+  and `a3`-`a6` must survive every path. All three get a canary in the
+  caller-owned upper 24 bits of `d0`; linear and `ring_mod` also get canaries
+  in the caller-owned high words of `d1` and `d2`. The general ring
+  deliberately uses those two high words for its packed bounds instead.
 * **`align68k.py` / `align_ring2.py`** hook every memory access and reject a
   `.w`/`.l` at an odd address. A real 68000 raises an address error there;
   Unicorn does not, so without this the emulator would happily bless code
@@ -67,15 +69,17 @@ budgets.
   it at 65535 on all four decode paths, and checks that `jx1 -l65535` produces
   streams that stay inside it. Every hand-authored stream is validated against
   the Java decompressor first — if the reference cannot read it, no 68k result
-  from it means anything.
+  from it means anything. It also places the N=65535 general ring across a
+  64 KB address boundary and fills it in both caller- and decoder-wrap modes.
 * **`test_ring*.py`** additionally require that nothing is ever written
   outside the ring, that the write pointer never wraps inside a call, that
-  the decoder-specific preserved registers come back untouched, and that a
-  finished stream stays finished. The general suite also checks its preserved
-  `d2` end bound and packed N in `d1.high`, in both caller-wrap and
-  decoder-wrap modes. The fixed suite checks preserved `a2`/`a3`/`a4` and
-  requires every continuing call to emit exactly one chunk; its caller wraps
-  `a1` when it reaches the end.
+  the common preserved registers come back untouched, and that a finished
+  stream stays finished. At general-ring init only, `d3.l` supplies the end
+  pointer; init packs N into `d1.high` and the end pointer's low word into
+  `d2.high`, leaving no persistent bound register. The general suite checks
+  both packed values throughout its 19 caller-wrap and decoder-wrap shapes.
+  The fixed suite requires every continuing call to emit exactly one chunk;
+  its caller wraps `a1` when it reaches the end.
 * **`compat.py`** is the only script here whose reference is not jx1. It
   builds `zx1` and `dzx1` from `c/zx1/src` and checks that jx1's output
   matches the C compressor's byte for byte, that each side decompresses the
@@ -86,11 +90,11 @@ budgets.
   pass unnoticed.
 * **`audit.py`** checks the documentation against the sources: assembled
   sizes against the README's table, that no decoder names `a5` or a context
-  field at all, that every header states its decoder-specific clobbered set,
+  field at all, that every header states the common clobbered set,
   jump-table slots against the documented entries, fixed-ring shape/alignment
-  declarations, no `cmp.l` on a data register, the state encoding the entry
-  dispatch relies on, and that the harnesses still poison and still fail on
-  `BAD`.
+  declarations, no `cmp.l` on a data register, no wider-than-byte `d0` access
+  during resume, the state encoding the entry dispatch relies on, and that the
+  harnesses still poison and still fail on `BAD`.
 
 The hardware harness in the parent directory covers what emulation cannot:
 real 68000 timing, and address errors actually faulting.

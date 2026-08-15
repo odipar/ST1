@@ -24,8 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test68k as t                                                    # noqa: E402
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN               # noqa: E402
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1,        # noqa: E402
-                                UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D5,
-                                UC_M68K_REG_D4)
+                                UC_M68K_REG_D1, UC_M68K_REG_D2,
+                                UC_M68K_REG_D3)
 
 
 def make_emu(stream):
@@ -162,10 +162,13 @@ def run_linear(stream, chunk=None):
         t.call(uc, t.CODE + 4)                                  # jx1_decompress
         return bytes(uc.mem_read(t.DST, uc.reg_read(UC_M68K_REG_A1) - t.DST))
     t.call(uc, t.CODE)
+    t.seed_word_state_highs(uc)
     calls = 0
     while True:
-        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is per call now
-        if t.call(uc, t.CODE + 8) == 0:
+        uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
+        more = t.call(uc, t.CODE + 8)
+        t.assert_word_state_highs(uc)
+        if more == 0:
             break
         calls += 1
         assert calls < 200000, 'resume loop does not terminate'
@@ -173,26 +176,34 @@ def run_linear(stream, chunk=None):
     return bytes(uc.mem_read(t.DST, end - t.DST))   # the state registers
 
 
-def run_ring(stream, n, chunk, mod=False, ring=t.DST):
+def run_ring(stream, n, chunk, mod=False, ring=t.DST, caller_wrap=True):
     uc = make_emu(stream)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
     if not mod:
-        uc.reg_write(UC_M68K_REG_D2, ring + n)
+        uc.reg_write(UC_M68K_REG_D3, ring + n)       # transient init bound
     t.call(uc, t.CODE)
-    if not mod:
+    if mod:
+        t.seed_word_state_highs(uc)
+    else:
         assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N was not initialized'
+        assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
+            'packed end.low was not initialized'
     out, prev, calls = bytearray(), ring, 0
     while True:
-        uc.reg_write(UC_M68K_REG_D4, chunk)
+        uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
         more = t.call(uc, t.CODE + 4)
+        if mod:
+            t.assert_word_state_highs(uc)
         dst = uc.reg_read(UC_M68K_REG_A1)
         out += uc.mem_read(prev, dst - prev)
         if not mod:
             assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed'
-            assert uc.reg_read(UC_M68K_REG_D2) == ring + n, 'ring end changed'
+            assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
+                'packed end.low changed'
         if dst == ring + n:
-            uc.reg_write(UC_M68K_REG_A1, ring)
+            if mod or caller_wrap:
+                uc.reg_write(UC_M68K_REG_A1, ring)
             prev = ring
         else:
             prev = dst
@@ -216,17 +227,22 @@ def check_crossing_general_ring():
         print('BAD STREAM general ring 64-K crossing: Java reference mismatch')
         return 1
     t.BIN = t._binary('jx1_68000_ring.bin')
-    try:
-        got = run_ring(stream, MAX_OP, 32768, ring=ring)
-    except Exception as e:
-        print(f'FAIL general ring 64-K crossing: {type(e).__name__}: {e}')
-        return 1
-    if got != expected:
-        print(f'FAIL general ring 64-K crossing: {len(got)} bytes, '
-              f'expected {len(expected)}')
-        return 1
+    for caller_wrap in (True, False):
+        try:
+            got = run_ring(stream, MAX_OP, 32768, ring=ring,
+                           caller_wrap=caller_wrap)
+        except Exception as e:
+            mode = 'caller' if caller_wrap else 'decoder'
+            print(f'FAIL general ring 64-K crossing ({mode}-wrap): '
+                  f'{type(e).__name__}: {e}')
+            return 1
+        if got != expected:
+            mode = 'caller' if caller_wrap else 'decoder'
+            print(f'FAIL general ring 64-K crossing ({mode}-wrap): '
+                  f'{len(got)} bytes, expected {len(expected)}')
+            return 1
     if VERBOSE:
-        print('  general ring N=65535 across 64-K boundary: wraps correctly')
+        print('  general ring N=65535 across 64-K boundary: both wrap modes correct')
     return 0
 
 

@@ -10,8 +10,9 @@
 ; image as it is drained, which is exactly what a real caller does with it,
 ; and the wrap is detected the way the interface intends - the write pointer
 ; never wraps inside a call, so a full buffer reaches the harness's saved end.
-; The general decoder retains that end in d2 and can wrap on its next entry;
-; ring_mod has no bounds at all, so its caller wraps a1.
+; The general decoder packs N and the end address's low word above its common
+; word-sized state and can wrap on its next entry; ring_mod has no bounds at
+; all, so its caller wraps a1.
 ;
 ; The general build covers dividing and non-dividing shapes.  Each ring_mod
 ; build has one assembly-time RING_SIZE and covers fixed dividing budgets.
@@ -67,8 +68,7 @@ start:
         move.w  shapeidx,d0
         lsl.w   #3,d0
         adda.w  d0,a0
-        move.l  (a0)+,ringsz                    ; ring size (0 ends the table);
-                                                ; d6 belongs to the decoder now
+        move.l  (a0)+,ringsz                    ; ring size (0 ends the table)
         beq.s   .shapesdone
         move.l  (a0),d7                         ; chunk size
         bsr     verify_ring
@@ -147,16 +147,28 @@ verify_ring:
         move.l  CASE_EXP(a6),expptr
         move.l  CASE_ELEN(a6),expleft
 .loop:
-        move.l  #$BEEF0000,d5
-        move.l  d5,d6
-    .if RINGMOD
-        move.l  d5,d2                           ; mod clobbers d2/d5/d6
-    .else
-        movea.l d5,a2                           ; general clobbers a2/d5/d6;
-    .endif                                      ; d2 is its preserved end bound
-        move.w  d7,d4                           ; and d4 is this call's budget
+        move.l  #$BEEF0000,d3
+        move.l  d3,d4
+        move.l  d3,d5
+        movea.l d3,a2                           ; poison every scratch register
+        move.l  #$D6D61234,d6                   ; d6 is promised untouched
+        move.w  d7,d3                           ; d3.w is this call's budget
         bsr     jx1_resume                      ; a1 = write pointer, d1 = result
-        movem.l d0-d1/d3/a0,(a5)                ; the parse state is in registers
+        cmp.l   #$D6D61234,d6
+        bne     .bad
+    .if !RINGMOD
+        move.l  d1,d4                           ; the general ring's two high
+        swap    d4                              ; words are persistent metadata:
+        move.l  ringsz,d5                       ; N above remaining
+        cmp.w   d5,d4
+        bne     .bad
+        move.l  d2,d4
+        swap    d4                              ; end.low above lastOffset
+        move.l  ringend,d5
+        cmp.w   d5,d4
+        bne     .bad
+    .endif
+        movem.l d0-d2/a0,(a5)                   ; the parse state is in registers
                                                 ; now, and the draining below
                                                 ; clobbers a0 for its compare
         move.w  d1,retcode
@@ -188,7 +200,7 @@ verify_ring:
         movea.l ringbase,a1                     ; ring_mod does not wrap for us
     .endif
 .more:
-        movem.l (a5),d0-d1/d3/a0                ; hand the state back for the
+        movem.l (a5),d0-d2/a0                   ; hand the state back for the
         tst.w   retcode                         ; next call (in memory, not on
         bne     .loop                           ; the stack: .bad leaves early)
 
@@ -240,8 +252,9 @@ check_size:
         rts
 
 ; ring_init: a6 = case, ringsz = ring size, d7.w = chunk.  The general ABI
-; receives its sole end bound in d2 before init.  ring_mod receives no bounds,
-; but its storage is aligned to its assembly-time power-of-two RING_SIZE.
+; receives one-past-end transiently in d3.l at init, then packs N/end.low into
+; d1.high/d2.high. ring_mod receives no bounds, but its storage is aligned to
+; its assembly-time power-of-two RING_SIZE.
 ring_init:
         movea.l CASE_SRC(a6),a0
     .if RINGMOD
@@ -259,8 +272,8 @@ ring_init:
     .if RINGMOD
         bsr     jx1_init
     .else
-        move.l  a2,d2                           ; end is present at init and is
-        bsr     jx1_init                        ; preserved across every resume
+        move.l  a2,d3                           ; end is consumed only at init;
+        bsr     jx1_init                        ; resumes need no bound register
     .endif
         rts
 
@@ -294,7 +307,7 @@ time_ring:
 .loop:
         bsr     ring_init
 .drain:
-        move.w  d7,d4                           ; the budget is a parameter now
+        move.w  d7,d3                           ; the budget is a parameter now
         bsr     jx1_resume
     .if RINGMOD
         cmpa.l  ringend,a1                      ; a real caller folds this into
@@ -351,7 +364,7 @@ m_t:        dc.b    "T ",0
         even
 save_ssp:   ds.l    1
 iters:      ds.l    1
-state:      ds.l    4                           ; d0/d1/d3/a0 across a drain
+state:      ds.l    4                           ; d0-d2/a0 across a drain
 ringsz:     ds.l    1                           ; ring size retained by the harness
 ringbase:   ds.l    1                           ; runtime-selected aligned base
 ringend:    ds.l    1                           ; harness drain boundary
