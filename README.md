@@ -35,29 +35,29 @@ Additions/differences to the original:
 
 ## Compatibility with ZX1
 
-jx1 is a port, not a fork of the format: a jx1 stream is a ZX1 stream and vice
-versa. [68k/test/emu/compat.py](68k/test/emu/compat.py) builds `zx1` and `dzx1`
-from this repository's own copy of the C sources — so the reference is Einar
-Saukas' implementation, freshly compiled, not a stored fixture — and asks four
-questions:
+jx1 is a port of ZX1, not a fork of the format: every jx1 stream is a ZX1
+stream, and every ZX1 stream is a jx1 stream. With no options jx1 produces
+byte-identical output to Einar Saukas' C compressor, and each side decompresses
+what the other produces. [68k/test/emu/compat.py](68k/test/emu/compat.py)
+checks all of that on every test run — including the 68000 decoders reading a
+C-produced stream — against `zx1` and `dzx1` built from this repository's own
+[c/zx1/src](c/zx1/src), so the reference is somebody else's implementation
+rather than a stored fixture.
 
-| | check | scope |
-|---|---|---|
-| 1 | jx1's output equals the C compressor's, byte for byte | 11 corpora × default, `-b`, `-q` |
-| 2 | jx1 decompresses what C compresses | 11 streams |
-| 3 | C decompresses what jx1 compresses | 11 corpora × 6 option sets, including `-mN` and `-lN` |
-| 4 | the **68000** decoders decode a C-produced stream | 44 decodes across all three |
+`-mN` and `-lN`, which the C compressor does not have, change *which parse is
+chosen* and never the encoding, so what they emit is still ordinary ZX1.
 
-The fourth is the one that cannot be faked. Everything else checks jx1 against
-jx1, where a shared misunderstanding of the format would pass unnoticed; there
-the reference is somebody else's code.
+Two warnings:
 
-Question 3 covers the two options C does not have. `-mN` and `-lN` change
-*which parse is chosen*, never the encoding, so what comes out is ordinary ZX1
-— which is why `dzx1` reads all of it. The one place the two compressors
-legitimately differ is `-l65535` on input with a very long match: C emits one
-69999-byte match where jx1 emits two, so C's stream is smaller and jx1's is
-safe on a 68000. Both are valid, and both decode to the same bytes.
+* **A stream compressed without `-l65535` may not be safe on a 68000.** The
+  format allows an operation longer than 65535 bytes — 70000 identical bytes
+  compress to a single 69999-byte match — and the 68000 decoders hold that
+  length in a word. Such a stream decodes *short*, with no error. Java and the
+  C tool decode it correctly, so nothing will warn you.
+* **`-mN` is a promise about the decompressor, not a size knob.** It limits
+  offsets to N so the stream can be decompressed through an N-byte ring
+  buffer. Feeding a ring buffer a stream compressed without a matching `-mN`
+  reads outside the buffer.
 
 ## The 68k decompressors
 
