@@ -139,16 +139,17 @@ for f in FILES:
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
     check('tst.b   d2' in body, f'{f}: the entry dispatches on the state register')
-    check('d2  operation state' in src, f'{f}: the header maps the state register')
+    check('d2.b  operation state' in src, f'{f}: the header maps the state register')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
 # the clobbered set, stated where a caller will look for it
 for f in FILES:
     src = (K68 / f).read_text()
-    check('CLOBBERED    d4 d5 d6 a4' in src, f'{f}: names the clobbered registers')
-check('| **clobbered** | **`d4` `d5` `d6` `a4`** |' in readme,
-      'README names the clobbered registers')
+    check('CLOBBERED    d4.w d5.l d6.l' in src and 'a4.l' in src,
+          f'{f}: names the clobbered registers, with widths')
+check('| **clobbered** | **`d4.w` `d5.l` `d6.l` `a4.l`** |' in readme,
+      'README names the clobbered registers, with widths')
 
 # The calling sequences in the README are code a reader will copy, so they have
 # to use the registers the decoders actually use.

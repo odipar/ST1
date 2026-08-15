@@ -27,27 +27,33 @@
 ; keep alive; jx1_init seeds four registers and a resume loop leaves all six
 ; alone between calls:
 ;
-;   a0  input position
-;   a1  write pointer - where the output ends, after every call
-;   d0  bit queue (only the low byte is used; $80 is the empty sentinel)
-;   d1  bytes remaining in the current operation (low word)
-;   d2  operation state: $80 START, 0 LITERALS, 2 MATCH, $FF DONE. Signed on
-;       purpose, so the entry dispatches on the flags a tst.b already sets
-;   d3  offset of the current match, and of the last one, which the format
-;       lets a later match reuse
+;   a0.l  input position
+;   a1.l  write pointer - where the output ends, after every call
+;   d0.b  bit queue ($80 is the empty sentinel)
+;   d1.w  bytes remaining in the current operation
+;   d2.b  operation state: $80 START, 0 LITERALS, 2 MATCH, $FF DONE. Signed
+;         on purpose, so the entry dispatches on flags a tst.b already sets
+;   d3.w  offset of the current match, and of the last one, which the format
+;         lets a later match reuse
+;
+; The widths are what the decompressor touches: it never looks above d0's low
+; byte or d1's low word, so what you leave in the rest is your business.
 ;
 ; Calling convention, in full:
 ;
-;   in and out   a0 a1 d0 d1 d2 d3   the state; leave it alone between calls
+;   in and out   a0.l a1.l d0.b      the state; leave it alone between calls
+;                d1.w d2.b d3.w
 ;   in           d4.w                this call's budget, spent by the call
-;   out          d5                  0 = fully processed, 1 = more to come
-;   CLOBBERED    d4 d5 d6 a4         no value in these survives a call
+;   out          d5.l                0 = fully processed, 1 = more to come
+;   CLOBBERED    d4.w d5.l d6.l      no value in these survives a call
+;                a4.l
 ;   untouched    d7 a2 a3 a5 a6      and the stack beyond the return address
 ;
 ; d5 and d6 are working registers throughout - d5 carries the segment length
-; and the copy-ladder index, d6 the gamma value - so treat both as gone across
-; a call; d5 is merely the last thing written to it. d4 comes back spent, not
-; refilled: pass it again on the next call.
+; and the copy-ladder index, d6 the gamma value and the room arithmetic - so
+; treat both as gone across a call; d5 is merely the last thing written to it.
+; Only d4's low word is spent, but it is spent, not refilled: pass the budget
+; again on the next call.
 ;
 ; A finished stream keeps returning 0 however often you poll it.
 ;

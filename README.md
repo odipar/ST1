@@ -77,26 +77,6 @@ cycle-measured emulation and on real 68000 hardware (Atari ST — see
 [68k/test/](68k/test/)), and all three resume after at most one
 budget of output.
 
-### Why there is no context block
-
-A resumable decompressor has to keep its parse state somewhere between calls,
-and the obvious place is a caller-supplied context block in memory. The
-trouble is what that costs on a 68000: the entry has to load the state and
-the suspend has to store it, which measured at about **100 cycles per call** —
-on a call that, drained sixteen bytes at a time, produces only sixteen bytes
-of output.
-
-Holding the state in registers instead is worth **+7.6% to +17.2%** at that
-drain size on an Atari ST, and it costs the caller nothing it was not already
-doing: a drain loop has to touch the write pointer anyway, and the other five
-registers it simply leaves alone. The last offset gets a register to itself
-for the same reason — sharing one with the remaining count meant a `swap`
-pair on every match segment, and unpacking it measured **+1.2% to +1.5%**.
-
-Beyond the cycles: nothing to allocate, nothing to align, nothing to keep
-alive, and a second concurrent stream is a second set of registers rather
-than a second block of memory.
-
 [68k/jx1_68000.S](68k/jx1_68000.S) is the one to reach for unless you need
 bounded memory:
 
@@ -138,12 +118,15 @@ resume loop just leaves them alone between calls.
 
 | register | role |
 |---|---|
-| `a0` | input position |
-| `a1` | write pointer — where the output ends, after every call |
-| `d0` | bit queue |
-| `d1` | bytes remaining in the current operation |
-| `d2` | operation state |
-| `d3` | last offset |
+| `a0.l` | input position |
+| `a1.l` | write pointer — where the output ends, after every call |
+| `d0.b` | bit queue |
+| `d1.w` | bytes remaining in the current operation |
+| `d2.b` | operation state |
+| `d3.w` | last offset |
+
+The widths are what the decompressor touches — it never looks above `d0`'s low
+byte or `d1`'s low word — so what you leave in the rest is your business.
 
 `jx1_init` takes the stream in `a0` and the destination in `a1`, and seeds the
 other four. Each `jx1_resume` emits at most `d4.w` bytes and returns `d5 = 0`
@@ -169,10 +152,10 @@ decompressor.
 
 | | registers |
 |---|---|
-| state, in and out | `a0` `a1` `d0` `d1` `d2` `d3` (rings also take `a2`/`a3`, read-only) |
+| state, in and out | `a0.l` `a1.l` `d0.b` `d1.w` `d2.b` `d3.w` (rings also take `a2.l`/`a3.l`, read-only) |
 | in | `d4.w`, this call's budget — **spent** by the call, so pass it again |
-| out | `d5` — 0 done, 1 more |
-| **clobbered** | **`d4` `d5` `d6` `a4`** |
+| out | `d5.l` — 0 done, 1 more |
+| **clobbered** | **`d4.w` `d5.l` `d6.l` `a4.l`** |
 | untouched | `d7` `a5` `a6`, and the stack beyond the return address |
 
 The state sits at the bottom of both register files and the scratch above it,
@@ -213,9 +196,9 @@ both.
 Neither needs a callback or an extra return code: `jx1_resume` still returns
 just 0 (done) and 1 (more), and neither has a context block either. They take
 the same six state registers as the linear version plus the ring bounds,
-read-only, in `a2`/`a3` — the caller holds those anyway, since it needs them
-to drain. `d4` is the budget, and `d4`/`d5`/`d6`/`a4` come back clobbered,
-exactly as for the linear version.
+read-only, in `a2.l`/`a3.l` — the caller holds those anyway, since it needs
+them to drain. `d4.w` is the budget, and `d4.w`/`d5.l`/`d6.l`/`a4.l` come back
+clobbered, exactly as for the linear version.
 
 `jx1_resume` (slot base+4 — there is no one-shot, since a bounded buffer has
 to be drained) takes the ring bounds read-only in a2/a3 and the write pointer
