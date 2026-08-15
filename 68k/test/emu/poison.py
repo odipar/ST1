@@ -1,9 +1,8 @@
 """Does a caller leaving junk in the clobbered registers break the decoders?
 
 The ABI names the registers jx1_resume clobbers, which promises nothing about
-their incoming values - so a caller may legally pass anything in them. That
-set is now small: the parse state lives in d0/d1/d3 and a0/a1 between calls,
-and d4 is the budget, which leaves d4, d5, d6 and a4.
+their incoming values - so a caller may legally pass anything in them.  The
+three decoders now deliberately have different scratch sets, checked here.
 """
 import sys, importlib.util
 from pathlib import Path
@@ -18,16 +17,21 @@ from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, 
                                 UC_M68K_REG_A6, UC_M68K_REG_D5, UC_M68K_REG_D7,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4)
-REGS = {'d5': UC_M68K_REG_D5, 'd6': UC_M68K_REG_D6, 'a4': UC_M68K_REG_A4}
+BIN = POS[0] if POS else 'jx1_68000_ring.bin'
+LINEAR = len(POS) > 1 and POS[1] == 'linear'
+MOD = 'ring_mod' in BIN
+REGS = {'d2': UC_M68K_REG_D2, 'd5': UC_M68K_REG_D5,
+        'd6': UC_M68K_REG_D6, 'a2': UC_M68K_REG_A2,
+        'a4': UC_M68K_REG_A4}
 
 def run(data, n, chunk, poison):
     comp = t.java_compress(data, min(n, 32512))
     uc = t.make_emu(comp)
-    ring = t.DST
+    ring = ((t.DST + n - 1) & -n) if MOD else t.DST
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
-
+    if not LINEAR and not MOD:
+        uc.reg_write(UC_M68K_REG_D2, ring + n)   # general ring's sole bound
     t.call(uc, t.CODE)
-    uc.reg_write(UC_M68K_REG_A2, ring); uc.reg_write(UC_M68K_REG_A3, ring + n)
     uc.reg_write(UC_M68K_REG_A1, ring)         # the caller holds the write pointer
     out, prev, calls = bytearray(), ring, 0
     while True:
@@ -45,54 +49,77 @@ def run(data, n, chunk, poison):
         if not (ring <= dst <= ring + n):
             return f'DST OUT OF RING ({dst - ring})'
         out += uc.mem_read(prev, max(0, dst - prev))
-        prev = ring if dst == ring + n else dst
+        if dst == ring + n:
+            if MOD:                             # fixed ring requires caller wrap
+                uc.reg_write(UC_M68K_REG_A1, ring)
+            prev = ring
+        else:
+            prev = dst
         if rc == 0:
             break
     return 'ok' if bytes(out) == data else f'WRONG ({len(out)} of {len(data)} bytes)'
 
-BIN = POS[0] if POS else 'jx1_68000_ring.bin'
-LINEAR = len(POS) > 1 and POS[1] == 'linear'
 ENTRY = t.CODE + (8 if LINEAR else 4)
 # The loop below drives the ring interface. The linear decoder has no ring - it
 # writes straight ahead - so the only meaningful bound for it is one that holds
 # the whole output; a smaller N would flag ordinary linear output as escaping.
-SIZES = ((65535, 16),) if LINEAR else ((1024, 16), (65535, 16))
+SIZES = (((65535, 16),) if LINEAR else
+         ((1024, 16),) if MOD else ((1024, 16), (65535, 16)))
+POISONS = (('d5',), ('d6',), ('a4',), ('d5', 'd6', 'a4')) if LINEAR else \
+          (('d2',), ('d5',), ('d6',), ('d2', 'd5', 'd6')) if MOD else \
+          (('a2',), ('d5',), ('d6',), ('a2', 'd5', 'd6'))
 failures = 0
 for name, data, _ in t.testcases():
     if name not in ('word-soup', 'rle-32k'):
         continue
     for n, chunk in SIZES:
-        for poison in ([], ['d5'], ['d6'], ['a4'], ['d5', 'd6', 'a4']):
+        for poison in ((), *POISONS):
             r = run(data, n, chunk, poison)
             tag = 'clean' if not poison else '+'.join(poison)
             flag = '' if r == 'ok' else '   <-- FAILS'
             failures += r != 'ok'
             print(f'{BIN:12s} {name:10s} N={n:5d} X={chunk:3d} poison={tag:26s} {r}{flag}')
-# The other half of the same contract: exactly which registers a call destroys.
-# Canary every non-state register around one call; d2 is newly free.
+# The other half of the same contract: exactly which registers calls may
+# destroy.  Canary every non-state register before every call and union the
+# changes over a whole mixed stream.  A scratch register need not change on
+# every path (ring_mod's d2 is only borrowed by a match), whereas an untouched
+# register must survive every path.
 CANARY = 0x5A5A0000
 ALL = {'d2': UC_M68K_REG_D2, 'd4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5,
        'd6': UC_M68K_REG_D6, 'd7': UC_M68K_REG_D7, 'a2': UC_M68K_REG_A2,
        'a3': UC_M68K_REG_A3, 'a4': UC_M68K_REG_A4, 'a5': UC_M68K_REG_A5,
        'a6': UC_M68K_REG_A6}
-STATE = ('d0', 'd1', 'd3')                # plus a0/a1, and a2/a3 for the rings
-EXPECTED = {'d4', 'd5', 'd6', 'a4'}
+STATE = ('d0', 'd1', 'd3')                # plus a0/a1; general ring also has d2
+EXPECTED = ({'d4', 'd5', 'd6', 'a4'} if LINEAR else
+            {'d2', 'd4', 'd5', 'd6'} if MOD else
+            {'d4', 'd5', 'd6', 'a2'})
 
 
 def clobbered(data, n, chunk):
     comp = t.java_compress(data, min(n, 32512))
     uc = t.make_emu(comp)
-    uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, t.DST)
+    ring = ((t.DST + n - 1) & -n) if MOD else t.DST
+    uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
+    if not LINEAR and not MOD:
+        uc.reg_write(UC_M68K_REG_D2, ring + n)
     t.call(uc, t.CODE)
-    initial = {name: CANARY | i for i, name in enumerate(ALL)}
-    initial['d4'] = chunk
-    if not LINEAR:
-        initial['a2'], initial['a3'] = t.DST, t.DST + n
-    for name, reg in ALL.items():
-        uc.reg_write(reg, initial[name])
-    t.call(uc, ENTRY)
-    return {name for name, reg in ALL.items()
-            if uc.reg_read(reg) != initial[name]}
+    seen, calls = set(), 0
+    while True:
+        calls += 1
+        assert calls <= len(data) + 2, 'clobber probe did not terminate'
+        initial = {name: CANARY | i for i, name in enumerate(ALL)}
+        initial['d4'] = chunk
+        if not LINEAR and not MOD:
+            initial['d2'] = ring + n
+        for name, reg in ALL.items():
+            uc.reg_write(reg, initial[name])
+        more = t.call(uc, ENTRY)
+        seen |= {name for name, reg in ALL.items()
+                 if uc.reg_read(reg) != initial[name]}
+        if not LINEAR and uc.reg_read(UC_M68K_REG_A1) == ring + n and MOD:
+            uc.reg_write(UC_M68K_REG_A1, ring)
+        if more == 0:
+            return seen
 
 
 data = next(d for n, d, _ in t.testcases() if n == 'word-soup')
@@ -105,5 +132,6 @@ else:
     print(f'{BIN:12s} clobbers exactly {" ".join(sorted(EXPECTED))}, as documented')
 
 print(f'{"ALL POISON CASES PASS" if not failures else f"{failures} FAILURES"} '
-      f'- d5/d6/a4 may arrive as junk, and d4/d5/d6/a4 are what a call destroys')
+      f'- incoming scratch is ignored and the call destroys exactly '
+      f'{"/".join(sorted(EXPECTED))}')
 sys.exit(1 if failures else 0)

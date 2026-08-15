@@ -11,7 +11,8 @@ def check(cond, msg):
 FILES = ['jx1_68000.S', 'jx1_68000_ring.S', 'jx1_68000_ring_mod.S']
 sizes = {}
 for f in FILES:
-    out = subprocess.run(ASM + ['-o', '/tmp/a.bin', str(K68 / f)],
+    defines = ['-dRING_SIZE=1024'] if f == 'jx1_68000_ring_mod.S' else []
+    out = subprocess.run(ASM + defines + ['-o', '/tmp/a.bin', str(K68 / f)],
                          capture_output=True, text=True)
     check(out.returncode == 0, f'{f} assembles')
     sizes[f] = Path('/tmp/a.bin').stat().st_size
@@ -83,7 +84,8 @@ named = dict(re.findall(r'^(RING_\w+)\s+equ\s+(\d+)', harness, re.M))
 
 
 def parse_shapes(text):
-    return [(int(named.get(a, a)), int(b))
+    values = {**named, 'RING_SIZE': '1024'}      # representative fixed build
+    return [(int(values.get(a, a)), int(b))
             for a, b in re.findall(r'dc\.l\s+(\w+),(\d+)', text)]
 
 
@@ -94,8 +96,17 @@ for m in re.finditer(r'\.if\s+RINGMOD(.*?)\.else(.*?)\.endif', harness, re.S):
         break
 check(bool(mod_shapes) and bool(gen_shapes),
       f'ST harness declares both shape tables ({len(mod_shapes)}/{len(gen_shapes)})')
-check(all(n % x == 0 for n, x in mod_shapes),
-      f'every ring_mod shape divides: {[s for s in mod_shapes if s[0] % s[1]]}')
+check(all(n and not n & (n - 1) and n % x == 0 for n, x in mod_shapes),
+      f'every ring_mod shape is power-of-two/dividing: {mod_shapes}')
+mod_builds = [int(n) for n in re.findall(r'-dRING_SIZE=(\d+)',
+                                         (K68 / 'test' / 'run.sh').read_text())]
+check(len(set(mod_builds)) >= 2 and
+      all(1 <= n <= 32768 and not n & (n - 1) for n in mod_builds),
+      f'run.sh assembles multiple valid ring_mod variants ({mod_builds})')
+mod_budgets = [x for _, x in mod_shapes]
+check(all(x and n % x == 0 for n in mod_builds for x in mod_budgets),
+      f'every run.sh ring_mod build supports every harness budget '
+      f'(N={mod_builds}, X={mod_budgets})')
 check(any(n % x for n, x in gen_shapes),
       'the general-ring table exercises at least one non-dividing shape')
 check(all(n <= 65535 for n, _ in mod_shapes + gen_shapes),
@@ -120,7 +131,7 @@ for f in FILES:
 corpora = len(re.findall(r"^\s+\('", (K68 / 'test' / 'gendata.py').read_text(), re.M))
 claim = f'{corpora} corpora × {len(gen_shapes)} ring/chunk shapes'
 check(claim in test_readme, f'test README states the general-ring count ({claim})')
-mod_total = corpora * len(mod_shapes)
+mod_total = corpora * len(mod_shapes) * len(set(mod_builds))
 check(f'{mod_total} configurations' in test_readme,
       f'test README states the ring_mod count ({mod_total} configurations)')
 
@@ -142,19 +153,34 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    check(not re.search(r'^\s+[^;\n]*\bd2\b', body, re.M),
-          f'{f}: d2 is not touched by the decoder')
     check('d3.w  signed last offset' in src, f'{f}: the header maps the folded state')
+linear_body = '\n'.join(l for l in (K68 / FILES[0]).read_text().splitlines()
+                        if not l.lstrip().startswith(';'))
+ring_body = '\n'.join(l for l in (K68 / FILES[1]).read_text().splitlines()
+                      if not l.lstrip().startswith(';'))
+mod_body = '\n'.join(l for l in (K68 / FILES[2]).read_text().splitlines()
+                     if not l.lstrip().startswith(';'))
+check(not re.search(r'^\s+.*\bd2\b', linear_body, re.M),
+      'linear decoder leaves d2 untouched')
+check(re.search(r'^\s+.*\bd2\b', ring_body, re.M) and
+      not re.search(r'^\s+.*\ba[34]\b', ring_body, re.M),
+      'general ring uses d2/a2 and leaves a3/a4 untouched')
+check(re.search(r'^\s+.*\bd2\b', mod_body, re.M) and
+      not re.search(r'^\s+.*\ba[234]\b', mod_body, re.M),
+      'ring_mod uses d2 and leaves a2-a4 untouched')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
-# the clobbered set, stated where a caller will look for it
-for f in FILES:
+# The three ABIs intentionally expose different scratch registers.
+clobbers = {
+    'jx1_68000.S': ('CLOBBERED    d4.w d5.l d6.l', 'a4.l'),
+    'jx1_68000_ring.S': ('CLOBBERED    d4.w d5.l d6.l', 'a2.l'),
+    'jx1_68000_ring_mod.S': ('CLOBBERED    d2.l d4.w d5.l d6.l', None),
+}
+for f, (words, addr) in clobbers.items():
     src = (K68 / f).read_text()
-    check('CLOBBERED    d4.w d5.l d6.l' in src and 'a4.l' in src,
-          f'{f}: names the clobbered registers, with widths')
-check('| **clobbered** | **`d4.w` `d5.l` `d6.l` `a4.l`** |' in readme,
-      'README names the clobbered registers, with widths')
+    check(words in src and (addr is None or addr in src),
+          f'{f}: names its decoder-specific clobbered set')
 
 # The calling sequences in the README are code a reader will copy, so they have
 # to use the registers the decoders actually use.

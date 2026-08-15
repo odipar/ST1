@@ -24,8 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test68k as t                                                    # noqa: E402
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN               # noqa: E402
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1,        # noqa: E402
-                                UC_M68K_REG_A2, UC_M68K_REG_A3,
-                                UC_M68K_REG_D5, UC_M68K_REG_D4)
+                                UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D5,
+                                UC_M68K_REG_D4)
 
 
 def make_emu(stream):
@@ -173,22 +173,27 @@ def run_linear(stream, chunk=None):
     return bytes(uc.mem_read(t.DST, end - t.DST))   # the state registers
 
 
-def run_ring(stream, n, chunk):
+def run_ring(stream, n, chunk, mod=False, ring=t.DST):
     uc = make_emu(stream)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
-    uc.reg_write(UC_M68K_REG_A1, t.DST)
+    uc.reg_write(UC_M68K_REG_A1, ring)
+    if not mod:
+        uc.reg_write(UC_M68K_REG_D2, ring + n)
     t.call(uc, t.CODE)
-    uc.reg_write(UC_M68K_REG_A2, t.DST)
-    uc.reg_write(UC_M68K_REG_A3, t.DST + n)
-    out, prev, calls = bytearray(), t.DST, 0
+    if not mod:
+        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N was not initialized'
+    out, prev, calls = bytearray(), ring, 0
     while True:
         uc.reg_write(UC_M68K_REG_D4, chunk)
         more = t.call(uc, t.CODE + 4)
         dst = uc.reg_read(UC_M68K_REG_A1)
         out += uc.mem_read(prev, dst - prev)
-        if dst == t.DST + n:
-            uc.reg_write(UC_M68K_REG_A1, t.DST)
-            prev = t.DST
+        if not mod:
+            assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed'
+            assert uc.reg_read(UC_M68K_REG_D2) == ring + n, 'ring end changed'
+        if dst == ring + n:
+            uc.reg_write(UC_M68K_REG_A1, ring)
+            prev = ring
         else:
             prev = dst
         calls += 1
@@ -197,18 +202,46 @@ def run_ring(stream, n, chunk):
             return bytes(out)
 
 
+def check_crossing_general_ring():
+    """Pin the hardest low-word position case in the general ring.
+
+    N=65535 packs $ffff in d1.high.  The deliberately unaligned placement
+    crosses a 64-K address boundary, and the 65536-byte output fills the ring
+    once before copying the final byte after caller wrap.
+    """
+    stream, expected = new_match_stream(MAX_OP)
+    ring = t.DST + 0x8001
+    assert (ring >> 16) != ((ring + MAX_OP) >> 16)
+    if java_decompress(stream) != expected:
+        print('BAD STREAM general ring 64-K crossing: Java reference mismatch')
+        return 1
+    t.BIN = t._binary('jx1_68000_ring.bin')
+    try:
+        got = run_ring(stream, MAX_OP, 32768, ring=ring)
+    except Exception as e:
+        print(f'FAIL general ring 64-K crossing: {type(e).__name__}: {e}')
+        return 1
+    if got != expected:
+        print(f'FAIL general ring 64-K crossing: {len(got)} bytes, '
+              f'expected {len(expected)}')
+        return 1
+    if VERBOSE:
+        print('  general ring N=65535 across 64-K boundary: wraps correctly')
+    return 0
+
+
 # The largest chunk the contract allows, because these outputs are up to 65537
 # bytes: what matters here is that an operation survives being carried across
 # calls, not how many calls that takes - chunk 16 would be 4096 emulated calls
-# per case and eight times the runtime for the same property. The ring_mod
-# shape divides, as its contract requires (1016 = 8 x 127).
+# per case and eight times the runtime for the same property.  The ring_mod
+# variant is assembled for its power-of-two N and uses a fixed dividing X.
 DECODERS = [
     ('jx1_68000.bin',          lambda s: run_linear(s)),
     ('jx1_68000.bin',          lambda s: run_linear(s, 127)),
     ('jx1_68000_ring.bin',     lambda s: run_ring(s, 1024, 127)),
-    ('jx1_68000_ring_mod.bin', lambda s: run_ring(s, 1016, 127)),
+    ('jx1_68000_ring_mod_1024.bin', lambda s: run_ring(s, 1024, 128, True)),
 ]
-NAMES = ['linear one-shot', 'linear X=127', 'ring 1024/127', 'ring_mod 1016/127']
+NAMES = ['linear one-shot', 'linear X=127', 'ring 1024/127', 'ring_mod 1024/128']
 
 
 def jx1_compress(data, flags):
@@ -301,13 +334,14 @@ def main():
                     print(f'  {op:11s} L={length:6d} {name:17s}: '
                           f'{"decodes" if ok else "refuses (as documented)"}')
             rows.append((op, length, encoding))
+    failures += check_crossing_general_ring()
     failures += check_capped_mode()
     kept = sorted({l for _, l, _ in rows if l <= MAX_OP})
     print(f'{"ALL BOUNDARY TESTS PASS" if not failures else f"{failures} FAILURES"}'
           f' - operations up to {MAX_OP} decode identically on all four paths '
           f'({len(LIMITS)} operation kinds x {len(LENGTHS)} lengths, '
           f'{max(kept)} the largest representable; {len(CAPPED)} capped-mode '
-          f'streams)')
+          f'streams; general N=65535 64-K crossing)')
     return 1 if failures else 0
 
 

@@ -18,7 +18,10 @@ TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 python3 gendata.py
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S                  # linear
 rmac -m68000 -p +o3 -dRINGMOD=0 -i. -i.. -o JX1RING.PRG jx1_hatari_ring.S  # ring
-rmac -m68000 -p +o3 -dRINGMOD=1 -i. -i.. -o JX1RMOD.PRG jx1_hatari_ring.S  # ring_mod
+rmac -m68000 -p +o3 -dRINGMOD=1 -dRING_SIZE=256 -i. -i.. \
+    -o JX1RM256.PRG jx1_hatari_ring.S                         # fixed ring_mod N=256
+rmac -m68000 -p +o3 -dRINGMOD=1 -dRING_SIZE=1024 -i. -i.. \
+    -o JX1RM1K.PRG jx1_hatari_ring.S                          # fixed ring_mod N=1024
 
 # --disable-video runs Hatari headless (no window); it does not change what is
 # emulated - the shifter still contends for the bus, and the measured ticks are
@@ -41,5 +44,6 @@ run() {
 }
 run JX1TEST.PRG
 run JX1RING.PRG
-run JX1RMOD.PRG
+run JX1RM256.PRG
+run JX1RM1K.PRG
 exit $fail
