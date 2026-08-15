@@ -11,7 +11,7 @@
 ; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
 ; N and every back-reference must fit it; for N below 32512, compress with -mN.
 ;
-; 248 bytes, position-independent, one body: no macros, no tables, no
+; 266 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -37,9 +37,6 @@
 ;   .more:                              ; before it saves a1 again
 ;       tst.w   d1
 ;       bne.s   .loop
-;
-; jx1_68000_ring_mod.S applies when N is a compile-time power of two, the base
-; is aligned to N, and one fixed budget X divides N.
 ;
 ; -----------------------------------------------------------------------------
 ; RING BOUNDS. Entry clamps the budget to the destination room, so a1 reaches
@@ -134,6 +131,15 @@ wrap_a1:
         suba.l  d5,a1                   ; wrap a1; leave room = N
         bra.s   have_room
 
+source_wrapped:
+        move.l  d2,d5                   ; N = end.low + (-start.low)
+        clr.w   d5
+        add.l   d1,d5                   ; low words cannot carry into N
+        clr.w   d5
+        swap    d5                      ; zero-extend N at any 32-bit address
+        adda.l  d5,a2
+        bra.s   copy
+
 ; jx1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
 ; Emits no more than the budget or destination room. d1.w = 0 means done;
 ; [old a1 .. new a1) is fresh output. After draining at the end, either wrap
@@ -169,24 +175,17 @@ budget_fits:
         cmp.w   d4,d5                   ; word, as above: the room is at most N
         bcc.s   source_wrapped
         move.w  d5,d4                   ; this segment stops at the wrap
-source_wrapped:
-        move.l  d2,d5                   ; N = end.low + (-start.low)
-        clr.w   d5
-        add.l   d1,d5                   ; low words cannot carry into N
-        clr.w   d5
-        swap    d5                      ; zero-extend N at any 32-bit address
-        adda.l  d5,a2
-        bra.s   copy
+        bra.s   source_wrapped
 literal_source:
         movea.l a0,a2                   ; literals copy straight from the input
 copy:                                   ; Java: writeByte(...) - n moves total:
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
-        moveq   #7,d5                   ; d5 = n&7, partial-pass dispatch
+        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
         and.w   d4,d5
-        lsr.w   #3,d4                   ; d4 = n>>3 full passes
+        lsr.w   #4,d4                   ; d4 = n>>4 full passes
         add.w   d5,d5
-        neg.w   d5                      ; index = -2*(n&7)
+        neg.w   d5                      ; index = -2*(n&15)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
         move.b  (a2)+,(a1)+             ; entry at ladder_end-2k copies k bytes
@@ -197,8 +196,16 @@ ladder:
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
 ladder_end:
-        dbf     d4,ladder               ; full eight-byte passes
+        dbf     d4,ladder               ; full 16-byte passes
         tst.w   d2
         bmi.s   match_copied             ; matches consume no input here
         movea.l a2,a0                   ; literals do

@@ -174,35 +174,28 @@ def run_linear(stream, chunk=None):
     return bytes(uc.mem_read(t.DST, end - t.DST))   # the state registers
 
 
-def run_ring(stream, n, chunk, mod=False, ring=t.DST, caller_wrap=True):
+def run_ring(stream, n, chunk, ring=t.DST, caller_wrap=True):
     uc = make_emu(stream)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
-    if not mod:
-        uc.reg_write(UC_M68K_REG_D3, ring + n)       # transient init bound
+    uc.reg_write(UC_M68K_REG_D3, ring + n)       # transient init bound
     t.call(uc, t.CODE)
-    if mod:
-        t.seed_word_state_highs(uc)
-    else:
-        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
-            'packed -start.low was not initialized'
-        assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
-            'packed end.low was not initialized'
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
+        'packed -start.low was not initialized'
+    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
+        'packed end.low was not initialized'
     out, prev, calls = bytearray(), ring, 0
     while True:
         uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
         more = t.call(uc, t.CODE + 4)
-        if mod:
-            t.assert_word_state_highs(uc)
         dst = uc.reg_read(UC_M68K_REG_A1)
         out += uc.mem_read(prev, dst - prev)
-        if not mod:
-            assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
-                'packed -start.low changed'
-            assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
-                'packed end.low changed'
+        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
+            'packed -start.low changed'
+        assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
+            'packed end.low changed'
         if dst == ring + n:
-            if mod or caller_wrap:
+            if caller_wrap:
                 uc.reg_write(UC_M68K_REG_A1, ring)
             prev = ring
         else:
@@ -249,15 +242,13 @@ def check_crossing_general_ring():
 # The largest chunk the contract allows, because these outputs are up to 65537
 # bytes: what matters here is that an operation survives being carried across
 # calls, not how many calls that takes - chunk 16 would be 4096 emulated calls
-# per case and eight times the runtime for the same property.  The ring_mod
-# variant is assembled for its power-of-two N and uses a fixed dividing X.
+# per case and eight times the runtime for the same property.
 DECODERS = [
     ('jx1_68000.bin',          lambda s: run_linear(s)),
     ('jx1_68000.bin',          lambda s: run_linear(s, 127)),
     ('jx1_68000_ring.bin',     lambda s: run_ring(s, 1024, 127)),
-    ('jx1_68000_ring_mod_1024.bin', lambda s: run_ring(s, 1024, 128, True)),
 ]
-NAMES = ['linear one-shot', 'linear X=127', 'ring 1024/127', 'ring_mod 1024/128']
+NAMES = ['linear one-shot', 'linear X=127', 'ring 1024/127']
 
 
 def jx1_compress(data, flags):
@@ -354,7 +345,7 @@ def main():
     failures += check_capped_mode()
     kept = sorted({l for _, l, _ in rows if l <= MAX_OP})
     print(f'{"ALL BOUNDARY TESTS PASS" if not failures else f"{failures} FAILURES"}'
-          f' - operations up to {MAX_OP} decode identically on all four paths '
+          f' - operations up to {MAX_OP} decode identically on all three paths '
           f'({len(LIMITS)} operation kinds x {len(LENGTHS)} lengths, '
           f'{max(kept)} the largest representable; {len(CAPPED)} capped-mode '
           f'streams; general N=65535 64-K crossing)')
