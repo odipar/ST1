@@ -6,8 +6,10 @@ byte-identical output to the original C implementation — checked on every run 
 [c/zx1/src](c/zx1/src) and compares against it in
 [both directions](#compatibility-with-zx1).
 
-**Latest release: [v0.3](https://github.com/odipar/jx1/releases/tag/v0.3)** — the three
-assembled 68000 decompressors are attached to it (290, 290 and 272 bytes).
+**Latest release: [v0.3](https://github.com/odipar/jx1/releases/tag/v0.3)**, with the
+three assembled 68000 decompressors attached (290, 290 and 272 bytes). The sources
+here are ahead of it — smaller, faster, and with a different calling convention — so
+the sizes and the register contract below describe this tree, not that download.
 
 Additions/differences to the original:
 
@@ -68,48 +70,38 @@ the output goes and in what the caller has to promise:
 |---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 238 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
 | [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 252 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 234 B | the same ring, when N is a multiple of the chunk size | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 234 B | the same ring, when N is a multiple of the budget | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
-[68k/test/](68k/test/)), and all three resume after at most one chunk of
-output.
+[68k/test/](68k/test/)), and all three resume after at most one
+budget of output.
 
 ### Why there is no context block
 
-A resumable decompressor has to keep its parse state somewhere between calls.
-The obvious place is a caller-supplied context block, and that is where this
-one started: 16 bytes, loaded at entry and stored back at suspend. Every
-field that left it made the decoder smaller *and* faster, so eventually all of
-them did.
+A resumable decompressor has to keep its parse state somewhere between calls,
+and the obvious place is a caller-supplied context block in memory. The
+trouble is what that costs on a 68000: the entry has to load the state and
+the suspend has to store it, which measured at about **100 cycles per call** —
+on a call that, drained sixteen bytes at a time, produces only sixteen bytes
+of output.
 
-| step | context | linear | measured on an Atari ST |
-|---|---|---|---|
-| the write pointer becomes the caller's `a1` | 16 → 12 B | 290 B | +1.2…3.2% at chunk 16 |
-| the rest of the state becomes registers | 12 → **none** | 242 B | **+7.6…17.2%** at chunk 16 |
-| the last offset gets a register of its own | — | 238 B | +0.0…2.1% |
+Holding the state in registers instead is worth **+7.6% to +17.2%** at that
+drain size on an Atari ST, and it costs the caller nothing it was not already
+doing: a drain loop has to touch the write pointer anyway, and the other five
+registers it simply leaves alone. The last offset gets a register to itself
+for the same reason — sharing one with the remaining count meant a `swap`
+pair on every match segment, and unpacking it measured **+1.2% to +1.5%**.
 
-The middle row is the one that matters. A call had been opening with a
-`movem`, a `move.w` and two `move.b`s, and closing with the same in reverse —
-about **100 cycles of pure bookkeeping per call**, on a call that at chunk 16
-produces only sixteen bytes. Holding the state in registers costs the caller
-nothing it was not already doing: a drain loop touches `a1` anyway, and the
-rest it simply leaves alone.
+Beyond the cycles: nothing to allocate, nothing to align, nothing to keep
+alive, and a second concurrent stream is a second set of registers rather
+than a second block of memory.
 
-What it buys, beyond the cycles: nothing to allocate, nothing to align,
-nothing to keep alive, and a second concurrent stream is a second set of
-registers rather than a second block of memory.
-
-**Decision (2026-08-13): [68k/jx1_68000.S](68k/jx1_68000.S) is the
-project's 68000 decompressor** (formerly `jx1_68000_opt7.S`; renamed once
-chosen). It came out of an 18-variant optimization campaign as the sweet
-spot between speed, size, and readability:
+[68k/jx1_68000.S](68k/jx1_68000.S) is the one to reach for unless you need
+bounded memory:
 
 * 238 bytes of position-independent code, and no context block at all
 * one body — no macros, no tables, no self-modifying code; runs from ROM
-* +32–36% faster than the straight reference port at chunk 16 (+42–52% at
-  chunk 127) when it was chosen, and faster again since — measured under a
-  cycle-accurate emulation model and confirmed on an Atari ST
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
   longer than 65535 bytes; budgets 1..65535
@@ -119,7 +111,7 @@ spot between speed, size, and readability:
 All three decompressors validate **nothing** — not the stream, not the end of
 the input, not the destination, not their parameters. That is what makes them
 this small, and it means a malformed or hostile stream can read and write
-arbitrary memory, while a chunk size of zero never advances an operation and
+arbitrary memory, while a budget of zero never advances an operation and
 spins a caller's drain loop forever. They are built for assets you compressed
 yourself at build time. For data you did not produce, validate the stream and
 its decompressed length before calling in — the Java `Decompressor` runs its
@@ -163,15 +155,15 @@ whole 65535 at once:
         lea     stream,a0               ; compressed data
         lea     output,a1               ; destination
         bsr     jx1_init                ; seeds d0-d3; writes no memory
-.chunk:
+.loop:
         moveq   #16,d4                  ; at most 16 bytes from this call
         bsr     jx1_resume
-        ; ... per-chunk work here; a1 = end of output so far ...
-        tst.w   d0
-        bne.s   .chunk                  ; Java: while (resume()) { ... }
+        ; ... your own work here; a1 = end of output so far ...
+        tst.w   d5
+        bne.s   .loop                   ; Java: while (resume()) { ... }
 ```
 
-The only rule is the obvious one: whatever the per-chunk work does, it must
+The only rule is the obvious one: whatever your own work does, it must
 leave `a0`, `a1` and `d0`–`d3` as it found them, since those *are* the
 decompressor.
 
@@ -191,10 +183,10 @@ holds, and everything from `d4`/`a4` upwards is the decompressor's to wreck.
 length and the copy-ladder index, `d6` the gamma value — so treat both as
 gone across a call. `d5` is simply the last thing written to it.
 
-`d3` has the last offset to itself because it used to share `d1`'s high word,
-and reaching it cost a `swap` pair on every match segment — 0.11 to 0.40
-swaps per output byte on the benchmark corpora. Spending a register that
-nothing else wanted bought **+1.2% to +1.5%** and four bytes.
+`d3` holds the last offset alone rather than sharing a register with the
+remaining count: reaching a packed offset costs a `swap` pair on every match
+segment, which is 0.11 to 0.40 swaps per output byte across the benchmark
+corpora.
 
 `jx1_decompress` (a0 = stream, a1 = destination) is the one-shot convenience:
 it runs the whole stream and returns with `a1` at the end of the output. It
@@ -212,9 +204,9 @@ of the ring-buffer versions below.
 The Java `Decompressor` streams output through a caller-supplied ring buffer,
 so memory use is bounded by the buffer rather than by the output. Two files
 carry that to the 68000: [jx1_68000_ring.S](68k/jx1_68000_ring.S) takes any
-buffer and chunk size, and
+buffer and budget, and
 [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is smaller and faster when
-the chunk divides the buffer (below). They share everything else — the same
+the budget divides the buffer (below). They share everything else — the same
 parser, copy engine, entry work and interface — so read this section for
 both.
 
@@ -240,7 +232,7 @@ already have.
         lea     ring,a2                 ; the state is all the caller's: bounds
         lea     ring+4096,a3            ; in a2/a3, write pointer in a1
         movea.l a2,a6                   ; a6 = first undrained byte
-.chunk:
+.loop:
         moveq   #16,d4                  ; at most 16 bytes from this call
         bsr     jx1_resume
         ; consume [a6 .. a1)
@@ -249,13 +241,13 @@ already have.
         bne.s   .more
         movea.l a2,a6                   ; (ring_mod: also movea.l a2,a1)
 .more:
-        tst.w   d0
-        bne.s   .chunk
+        tst.w   d5
+        bne.s   .loop
 ```
 
 Decoding the same stream, the ring costs this much over the linear version:
 
-| chunk X | N = 1024 | N = 4096 | N = 32512 |
+| budget X | N = 1024 | N = 4096 | N = 32512 |
 |---|---|---|---|
 | 16 | +14.1…17.4% | +13.5…16.8% | +13.5…16.7% |
 | 64 | +6.8…11.0% | +6.6…10.3% | +6.6…10.3% |
@@ -267,10 +259,10 @@ Decoding the same stream, the ring costs this much over the linear version:
 
 The ring's work is **per call and per match segment, never per byte** — one
 clamp at entry, plus a source recompute and clamp for each match — so the
-overhead is set by the chunk size that amortizes it and is essentially
+overhead is set by the budget that amortizes it and is essentially
 independent of N (the three rows above move by less than 0.7 points across
-1024-, 4096- and 32512-byte rings). Larger chunks are close to free; a
-16-byte chunk pays the entry clamp every 16 bytes. A small ring also costs
+1024-, 4096- and 32512-byte rings). Larger budgets are close to free; a
+budget of 16 pays the entry clamp every 16 bytes. A small ring also costs
 compression ratio, since offsets are capped at N.
 
 A buffer of N bytes supports back-references up to exactly N, so compress with
@@ -283,15 +275,15 @@ into the buffer end still splits the copy into segments, so the rolled-out
 ladder itself never needs a bounds test.
 
 A call that runs into the end of the buffer therefore produces fewer than X
-bytes, so use the write pointer rather than an assumed chunk size.
+bytes, so use the write pointer rather than an assumed budget.
 
 ### When N is a multiple of X
 
 [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is the same decompressor
 with that divisibility as a **requirement**, and spends it. `dst − start` is
 then a multiple of X at every entry — it starts at 0, a call returning 1 wrote
-exactly one chunk, and a full buffer restarts at 0 — so the room is always a
-whole number of chunks and never fewer than one. The budget therefore needs
+exactly one budget, and a full buffer restarts at 0 — so the room is always
+a whole number of budgets and never fewer than one. The budget therefore needs
 no clamping at all: the entry drops the room arithmetic and keeps a single
 compare that restarts a full buffer at its first byte.
 
@@ -301,10 +293,10 @@ carry the same entry work otherwise, so that difference is the price of the
 general ring's room arithmetic and nothing else.
 
 Every call also emits exactly X bytes and returns 1, except the final one,
-which returns 0 with whatever is left — `output mod X` bytes, or a full chunk
+which returns 0 with whatever is left — `output mod X` bytes, or a full budget
 when X divides the output exactly. So a caller wanting fixed-size blocks gets
 them for free — a property the ST harness checks on every call, across 42
-configurations. Feeding it a chunk that does not divide
+configurations. Feeding it a budget that does not divide
 the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
 the caller cannot promise the ratio.
 
@@ -326,25 +318,25 @@ cannot, are in [68k/test/README.md](68k/test/README.md).
 
 ## Retired exploration
 
-The other seventeen variants — the reference port, the opt…opt6 progression,
-six exploration winners, the combo, the x16 batched-resume speed champion
-(+29–38% over opt7 at chunk 16, at the price of self-modifying code, a
-512-byte table, and a single active context), and the chunk-aligned format
-variant — are preserved in [retired/](retired/):
+The three decompressors above are what survived an optimization campaign;
+seventeen other 68000 variants are kept in [retired/](retired/) rather than
+deleted, because the measurements that rejected them are worth more than the
+code. They include the straight port the project started from, the steps
+between it and the current file, and several genuinely faster designs that
+were turned down for what they demanded: self-modifying code, a 512-byte
+table, or a limit of one active stream.
 
-* [retired/README.md](retired/README.md) — the previous README with the
-  complete variant tables, audited speed figures, and the
-  baseline-vs-opt7-vs-x16 pick guide
-* [retired/68k/OPTIMIZATIONS.md](retired/68k/OPTIMIZATIONS.md) — the measured
-  lab journal: 18 prototypes across six themes, the insights, the negative
-  results, and the final same-model audit of every claim
-* [retired/68k/](retired/68k/) — all seventeen retired `.S` files
+* [retired/68k/OPTIMIZATIONS.md](retired/68k/OPTIMIZATIONS.md) — the lab
+  journal: eighteen prototypes across six themes, with the negative results
+  written up as carefully as the wins
+* [retired/68k/](retired/68k/) — the seventeen `.S` files themselves
+* [retired/README.md](retired/README.md) — the README as it stood then, with
+  the full variant tables
 
-The Java classes behind retired experiments are retired too:
-[retired/java/](retired/java/) holds `OptimizerDcaw` (the decode-cost-aware
-parser), `CompressorChunked`/`DecompressorChunked` (the chunk-aligned
-format), and their tests, out of the Maven build; their stories are in the
-retired docs.
+Two Java experiments are retired the same way, out of the Maven build and
+documented in the same place: [retired/java/](retired/java/) holds a
+decode-cost-aware parser and a chunk-aligned format variant, with their
+tests.
 
 ## Layout
 
@@ -378,7 +370,7 @@ See [c/zx1/src](c/zx1/src) for the original source code
 | | |
 |---|---|
 | [v0.3](https://github.com/odipar/jx1/releases/tag/v0.3) | An external audit's six findings, acted on. The headline one is a compatibility defect at the project boundary: the compressor could emit an operation longer than the 68000 decoders' 16-bit length, so 70000 identical bytes decoded to 4464 with no error. `jx1 -l65535` splits an over-long match instead, leaving the parse untouched. The real limit turned out to be 65535, twice what the sources assumed, now pinned by hand-authored boundary streams. All three decompressors shrink — 290, 290 and 272 bytes — and `jx1_decompress` gains +4.2–16.3% from a word-sized private budget. The rings hand the write pointer back to the caller, dropping their context to 12 bytes. The test suite is the other half: it assembles fresh every run, cannot report success while failing, checks its own documentation, and now verifies jx1 against the original C implementation built from `c/zx1/src` — including the 68000 decoders reading a C-produced stream. |
-| [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2) | The ring buffer arrives on the 68000, in two forms and at no cost in context — `jx1_68000_ring.S` (300 B) for any buffer and chunk size, `jx1_68000_ring_mod.S` (288 B) when the chunk divides the buffer. The linear decompressor drops to 298 bytes, +32–36% over the reference port. A partial-register hazard in both ring decoders is fixed — the ABI declares `d0-d5` clobbered, so their *incoming* upper words are caller junk, and two clamps compared them long — and both harnesses now poison those registers before every call, with `run.sh` failing the command on any `BAD`. |
+| [v0.2](https://github.com/odipar/jx1/releases/tag/v0.2) | The ring buffer arrives on the 68000, in two forms and at no cost in context — `jx1_68000_ring.S` (300 B) for any buffer and chunk size, `jx1_68000_ring_mod.S` (288 B) when the chunk divides the buffer. The linear decompressor drops to 298 bytes, +32–36% over the straight port the project started from. A partial-register hazard in both ring decoders is fixed — the ABI declares `d0-d5` clobbered, so their *incoming* upper words are caller junk, and two clamps compared them long — and both harnesses now poison those registers before every call, with `run.sh` failing the command on any `BAD`. |
 | [v0.1](https://github.com/odipar/jx1/releases/tag/v0.1) | First release: the Java port with `Jx1`/`Djx1`, custom buffer sizes, the incremental ring buffer and resumable decompression, plus the 68000 decompressor chosen from an 18-variant campaign and validated on real hardware timing. |
 
 ## License

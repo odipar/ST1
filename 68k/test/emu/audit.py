@@ -150,6 +150,14 @@ for f in FILES:
 check('| **clobbered** | **`d4` `d5` `d6` `a4`** |' in readme,
       'README names the clobbered registers')
 
+# The calling sequences in the README are code a reader will copy, so they have
+# to use the registers the decoders actually use.
+for block in re.findall(r'```\n(        lea     stream.*?)```', readme, re.S):
+    check('bsr     jx1_resume' in block, 'README example calls jx1_resume')
+    check('tst.w   d5' in block, 'README example tests the return code in d5')
+    check(re.search(r'moveq   #\d+,d4', block), 'README example passes the budget in d4')
+    check('tst.w   d0' not in block, 'README example does not test the old return register')
+
 # 13. the operation-length contract, stated identically in all three headers and
 #     backed by 68k/test/emu/boundaries.py
 for f in FILES:
