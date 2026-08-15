@@ -1,4 +1,4 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-return global::Jx1.Djx1.Run(args);
+return global::Nx1.Nx1.Run(args);

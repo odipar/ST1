@@ -6,7 +6,7 @@ SCRATCH = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('t', SCRATCH / 'test68k.py')
 import sys as _s
 POS = [a for a in _s.argv[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
-BIN_NAME = POS[0] if POS else 'jx1_68000.bin'
+BIN_NAME = POS[0] if POS else 'ST1.bin'
 sys.argv = ['x', BIN_NAME, '16', '4,8']
 t = importlib.util.module_from_spec(spec); spec.loader.exec_module(t)
 from unicorn.unicorn_const import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE

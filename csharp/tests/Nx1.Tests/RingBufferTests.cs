@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class RingBufferTests
 {
@@ -82,7 +82,7 @@ public sealed class RingBufferTests
     [Fact]
     public void RejectsBackreferenceBeyondBufferSize()
     {
-        byte[] compressed = Compress(TestData.FarMatch(), global::Jx1.Jx1.MaxOffsetZx1);
+        byte[] compressed = Compress(TestData.FarMatch(), global::Nx1.Nx1.MaxOffsetZx1);
 
         InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
             Decompressor.Decompress(compressed, new byte[512]));

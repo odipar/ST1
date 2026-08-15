@@ -1,7 +1,7 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>ZX1 bitstream writer.</summary>
 /// <remarks>
@@ -67,7 +67,7 @@ public sealed class Compressor
     /// Literal runs also cannot be split because the format has no transition
     /// for one literal run immediately followed by another.
     /// <see cref="Result.LongestOp"/> therefore reports the actual maximum so
-    /// callers targeting the 68000 decoder can detect either case.
+    /// callers targeting an ST1 decoder can detect either case.
     /// </remarks>
     /// <param name="optimal">Final block of the parse returned by <see cref="Optimizer"/>.</param>
     /// <param name="input">The source bytes used to construct that parse.</param>

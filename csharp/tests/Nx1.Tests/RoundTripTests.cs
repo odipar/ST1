@@ -1,12 +1,12 @@
 using Xunit;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class RoundTripTests
 {
     private static byte[] Compress(byte[] input) =>
         Compressor.Compress(
-            Optimizer.Optimize(input, 0, global::Jx1.Jx1.MaxOffsetZx1),
+            Optimizer.Optimize(input, 0, global::Nx1.Nx1.MaxOffsetZx1),
             input,
             0,
             false).Output;
@@ -50,7 +50,7 @@ public sealed class RoundTripTests
     {
         byte[] input = TestData.FarMatch();
         byte[] output = Compressor.Compress(
-            Optimizer.Optimize(input, 0, global::Jx1.Jx1.MaxOffsetZx7),
+            Optimizer.Optimize(input, 0, global::Nx1.Nx1.MaxOffsetZx7),
             input,
             0,
             false).Output;

@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class OperationLimitTests
 {
@@ -8,7 +8,7 @@ public sealed class OperationLimitTests
     public void RejectsOffsetsOutsideTheFormatRange()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            Optimizer.Optimize([42], 0, global::Jx1.Jx1.MaxOffsetZx1 + 1));
+            Optimizer.Optimize([42], 0, global::Nx1.Nx1.MaxOffsetZx1 + 1));
     }
 
     [Fact]

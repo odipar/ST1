@@ -1,7 +1,7 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>
 /// Optimal LZ parser for the ZX1 format.
@@ -28,7 +28,7 @@ public static class Optimizer
     /// </param>
     /// <param name="offsetLimit">
     /// Largest permitted back-reference distance, from one through
-    /// <see cref="Jx1.MaxOffsetZx1"/>. Backwards encoding is limited to one less.
+    /// <see cref="Nx1.MaxOffsetZx1"/>. Backwards encoding is limited to one less.
     /// </param>
     /// <returns>The final block of a chain whose first node is the parser's fake head.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="input"/> is null.</exception>
@@ -48,7 +48,7 @@ public static class Optimizer
         {
             throw new ArgumentOutOfRangeException(nameof(skip));
         }
-        if (offsetLimit < InitialOffset || offsetLimit > Jx1.MaxOffsetZx1)
+        if (offsetLimit < InitialOffset || offsetLimit > Nx1.MaxOffsetZx1)
         {
             throw new ArgumentOutOfRangeException(nameof(offsetLimit));
         }

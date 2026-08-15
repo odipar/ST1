@@ -24,7 +24,7 @@ def _too_slow(data, n, chunk):
 
 sp = importlib.util.spec_from_file_location('t', SCRATCH / 'test68k.py')
 POS = [a for a in ARGS[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
-sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
+sys.argv = ['x', POS[0] if POS else 'ST1_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE

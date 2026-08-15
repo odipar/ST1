@@ -1,4 +1,4 @@
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 /// <summary>
 /// The test fixtures in the Java suite use java.util.Random. System.Random

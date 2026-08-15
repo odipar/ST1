@@ -1,7 +1,7 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>
 /// One block (literal run or match) in an optimal-parse chain.

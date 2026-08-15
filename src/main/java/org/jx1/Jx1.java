@@ -14,13 +14,13 @@ public final class Jx1 {
     public static final int MAX_OFFSET_ZX7 = 2176;
 
     /**
-     * The longest operation the 68000 decoders can represent: they hold an
+     * The longest operation the ST1 decoders can represent: they hold an
      * operation's remaining length in a word. A stream containing a longer
      * operation is still valid here and decodes correctly in Java, but decodes
      * to the wrong length on a 68000, so {@code -l65535} is what makes a stream
      * safe for them.
      */
-    public static final int MAX_OP_68K = 65535;
+    public static final int MAX_OP_ST1 = 65535;
 
     private Jx1() {}
 
@@ -79,7 +79,7 @@ public final class Jx1 {
                       -q      Quick non-optimal compression
                       -mN     Limit backreference offsets to N bytes
                       -lN     Split matches so no operation exceeds N bytes
-                              (use -l65535 for the 68000 decoders)""");
+                              (use -l65535 for the ST1 decoders)""");
             return;
         }
         String inputName = args[i];

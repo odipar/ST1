@@ -1,8 +1,8 @@
 ; -----------------------------------------------------------------------------
-; jx1_hatari.S - real-hardware validation harness for 68k/jx1_68000.S
+; ST1_test.S - real-hardware validation harness for 68k/ST1.S
 ;
-; A TOS program that decompresses embedded jx1 streams on a real 68000 and
-; verifies the output byte-for-byte, then measures decode time with the
+; A TOS program that decompresses embedded ZX1 streams through ST1 on a real
+; 68000, verifies the output byte-for-byte, then measures decode time with the
 ; system's 200 Hz tick. Timing is reported in ticks together with a
 ; calibration loop of exactly known cycle count, so the host can convert
 ; ticks to cycles without assuming a clock rate or interrupt overhead.
@@ -115,14 +115,14 @@ start:
         trap    #GEMDOS                         ; Pterm0
 
 ; -----------------------------------------------------------------------------
-; t_oneshot: jx1_decompress into an even destination; verify length + bytes.
+; t_oneshot: ST1_decompress into an even destination; verify length + bytes.
 ; -----------------------------------------------------------------------------
 t_oneshot:
         lea     m_c,a0
         bsr     puts
         movea.l CASE_SRC(a6),a0
         lea     dst_buf,a1
-        bsr     jx1_decompress
+        bsr     ST1_decompress
         move.l  a1,d0
         sub.l   #dst_buf,d0                     ; produced length
         lea     dst_buf,a0
@@ -138,7 +138,7 @@ t_odd:
         bsr     puts
         movea.l CASE_SRC(a6),a0
         lea     dst_buf+1,a1
-        bsr     jx1_decompress
+        bsr     ST1_decompress
         move.l  a1,d0
         sub.l   #dst_buf+1,d0
         lea     dst_buf+1,a0
@@ -167,7 +167,7 @@ run_resume:
         bsr     resume_setup
 .loop:
         move.w  d7,d3                           ; the budget is a parameter now
-        bsr     jx1_resume
+        bsr     ST1_resume
         tst.w   d1
         bne.s   .loop
         rts
@@ -184,7 +184,7 @@ run_resume_poison:
         move.l  d3,d5
         movea.l d3,a2
         move.w  d7,d3
-        bsr     jx1_resume
+        bsr     ST1_resume
         tst.w   d1
         bne.s   .loop
         rts
@@ -192,7 +192,7 @@ run_resume_poison:
 resume_setup:
         movea.l CASE_SRC(a6),a0
         lea     dst_buf,a1
-        bra     jx1_init                        ; tail call: its rts returns
+        bra     ST1_init                        ; tail call: its rts returns
 
 ; -----------------------------------------------------------------------------
 ; verify: a0 = produced buffer, d0 = produced length; compares against the
@@ -245,11 +245,11 @@ time_case:
         bra     crlf
 
 ; ------------------------------------------------------------ the decompressor
-        include "jx1_68000.S"
+        include "ST1.S"
         include "hatari_util.inc"
 
         .data
-m_banner:   dc.b    "JX1 ST TEST",13,10,0
+m_banner:   dc.b    "ST1 TEST",13,10,0
 m_calib:    dc.b    "CALIB ",0
 m_done:     dc.b    "DONE",13,10,0
 m_sp:       dc.b    " ",0

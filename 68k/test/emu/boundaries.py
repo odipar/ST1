@@ -157,7 +157,7 @@ def run_linear(stream, chunk=None):
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, t.DST)
     if chunk is None:
-        t.call(uc, t.CODE + 4)                                  # jx1_decompress
+        t.call(uc, t.CODE + 4)                                  # ST1_decompress
         return bytes(uc.mem_read(t.DST, uc.reg_read(UC_M68K_REG_A1) - t.DST))
     t.call(uc, t.CODE)
     t.seed_word_state_highs(uc)
@@ -219,7 +219,7 @@ def check_crossing_general_ring():
     if java_decompress(stream) != expected:
         print('BAD STREAM general ring 64-K crossing: Java reference mismatch')
         return 1
-    t.BIN = t._binary('jx1_68000_ring.bin')
+    t.BIN = t._binary('ST1_ring.bin')
     for caller_wrap in (True, False):
         try:
             got = run_ring(stream, MAX_OP, 32768, ring=ring,
@@ -244,9 +244,9 @@ def check_crossing_general_ring():
 # calls, not how many calls that takes - chunk 16 would be 4096 emulated calls
 # per case and eight times the runtime for the same property.
 DECODERS = [
-    ('jx1_68000.bin',          lambda s: run_linear(s)),
-    ('jx1_68000.bin',          lambda s: run_linear(s, 127)),
-    ('jx1_68000_ring.bin',     lambda s: run_ring(s, 1024, 127)),
+    ('ST1.bin',          lambda s: run_linear(s)),
+    ('ST1.bin',          lambda s: run_linear(s, 127)),
+    ('ST1_ring.bin',     lambda s: run_ring(s, 1024, 127)),
 ]
 NAMES = ['linear one-shot', 'linear X=127', 'ring 1024/127']
 
@@ -286,7 +286,7 @@ CAPPED = [
 def check_capped_mode():
     """-l65535 makes streams the plain mode cannot express on a 68000."""
     failures = 0
-    t.BIN = t._binary('jx1_68000.bin')
+    t.BIN = t._binary('ST1.bin')
     for name, data, flags in CAPPED:
         capped = flags if any(f.startswith('-l') for f in flags) else flags + ['-l65535']
         stream = jx1_compress(data, capped)

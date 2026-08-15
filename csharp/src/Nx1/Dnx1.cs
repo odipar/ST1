@@ -1,22 +1,23 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>Command-line ZX1 decompressor.</summary>
 /// <remarks>
-/// C# counterpart of the Java <c>Djx1</c> entry point, itself based on
+/// <c>Dnx1</c> is the C# counterpart of the Java <c>Djx1</c> entry point,
+/// itself based on
 /// <c>dzx1.c</c> from
 /// <see href="https://github.com/einar-saukas/ZX1">ZX1</see> by Einar Saukas.
 /// Output is streamed through the decoder's ring directly to the destination
 /// file instead of being accumulated in memory.
 /// </remarks>
-public static class Djx1
+public static class Dnx1
 {
     /// <summary>Runs the decompressor command.</summary>
     /// <param name="args">
     /// Arguments after the executable name. Syntax:
-    /// <c>djx1 [-f] [-mN] input.zx1 [output]</c>.
+    /// <c>dnx1 [-f] [-mN] input.zx1 [output]</c>.
     /// </param>
     /// <returns>Zero on success; one after a user-facing argument, file, or data error.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
@@ -24,7 +25,7 @@ public static class Djx1
     {
         ArgumentNullException.ThrowIfNull(args);
         Console.WriteLine(
-            "DJX1: Data decompressor v0.1 by Robbert van Dalen, "
+            "DNX1: Data decompressor v0.1 by Robbert van Dalen, "
             + "based on DZX1 v1.5: Data decompressor by Einar Saukas");
 
         // Process optional parameters.
@@ -75,7 +76,7 @@ public static class Djx1
         else
         {
             return Cli.Usage(
-                "Usage: djx1 [-f] [-mN] input.zx1 [output]\n"
+                "Usage: dnx1 [-f] [-mN] input.zx1 [output]\n"
                 + "  -f      Force overwrite of output file\n"
                 + "  -mN     Ring buffer of N bytes (default 65536); "
                 + "N must cover the largest offset");

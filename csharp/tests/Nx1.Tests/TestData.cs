@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 /// <summary>Deterministic samples shared by the tests and Java golden vectors.</summary>
 internal static class TestData

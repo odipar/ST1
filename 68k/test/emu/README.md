@@ -1,6 +1,6 @@
-# Emulator tests
+# ST1 emulator tests
 
-The differential suite behind every correctness claim about the 68000
+The differential suite behind every correctness claim about the ST1
 decompressors. Each script assembles the decoder with rmac, runs it under
 [Unicorn](https://www.unicorn-engine.org/) as a plain 68000, and checks the
 output byte-for-byte against the project's own Java compressor — so the
@@ -14,9 +14,9 @@ python3 68k/test/emu/test68k.py               # linear: 13 corpora × chunks
 python3 68k/test/emu/test_ring_gen.py         # ring: 13 corpora × 19 shapes
 python3 68k/test/emu/boundaries.py            # exact operation-length limits
 python3 68k/test/emu/align68k.py              # odd-address audit, linear
-python3 68k/test/emu/align_ring2.py jx1_68000_ring.bin
-python3 68k/test/emu/poison.py jx1_68000.bin linear
-python3 68k/test/emu/poison.py jx1_68000_ring.bin
+python3 68k/test/emu/align_ring2.py ST1_ring.bin
+python3 68k/test/emu/poison.py ST1.bin linear
+python3 68k/test/emu/poison.py ST1_ring.bin
 python3 68k/test/emu/audit.py                 # doc-vs-code claims
 python3 68k/test/emu/cycle_model.py --check   # current ideal-cycle tables
 python3 68k/test/emu/compat.py                # jx1 vs the original C zx1
@@ -56,10 +56,11 @@ non-power-of-two sizes, and dividing and non-dividing budgets.
 * **`boundaries.py`** hand-authors streams containing one operation of an
   exact length. The corpora top out at 32000 bytes, so nothing else here can
   reach the point where an operation's length stops fitting a word; this pins
-  it at 65535 on all three decode paths, and checks that `jx1 -l65535` produces
-  streams that stay inside it. Every hand-authored stream is validated against
-  the Java decompressor first — if the reference cannot read it, no 68k result
-  from it means anything. It also places the N=65535 general ring across a
+  it at 65535 on all three decode paths, and checks that `jx1 -l65535` or
+  `nx1 -l65535` produces streams that stay inside it. Every hand-authored
+  stream is validated against the Java decompressor first — if the reference
+  cannot read it, no ST1 result means anything. It also places the N=65535
+  general ring across a
   64 KB address boundary and fills it in both caller- and decoder-wrap modes.
 * **`test_ring_gen.py`** additionally requires that nothing is ever written
   outside the ring, that the write pointer never wraps inside a call, that
@@ -73,7 +74,7 @@ non-power-of-two sizes, and dividing and non-dividing budgets.
   builds `zx1` and `dzx1` from `c/zx1/src` and checks that jx1's output
   matches the C compressor's byte for byte, that each side decompresses the
   other, that the `-mN` and `-lN` options still produce streams C can read,
-  and — the part that belongs to this directory — that both 68000
+  and — the part that belongs to this directory — that both ST1
   decoders decode a stream the C compressor produced. Everything else here
   checks jx1 against jx1, where a shared misunderstanding of the format would
   pass unnoticed.

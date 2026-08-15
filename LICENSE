@@ -1,26 +1,25 @@
-jx1 License
-===========
+jx1 / nx1 / ST1 License
+=======================
 
-jx1 contains Java and C# ports of the ZX1 data compression format and
-algorithm, with resumable decompressors, 68000 decompressors, and related
+jx1 contains the Java jx1 and C# nx1 ports of the ZX1 data compression format
+and algorithm, with the ST1 resumable 68000 decompressors and related
 experiments. It follows the dual licensing structure of the original ZX1 (see
 c/zx1/LICENSE and the License section of c/zx1/README.md):
 
 1. THE COMPRESSOR - the Java and C# compressors and optimal parsers (Block,
-   Optimizer, Compressor, Jx1, and the retired compressor experiments),
-   derived from Einar Saukas' optimal C compressor - is available under the
-   BSD 3-Clause License below. In practice this is relevant only if you modify
-   its source code and/or incorporate the compressor within your own products;
-   if you just execute it to compress files, you can simply ignore these
-   conditions.
+   Optimizer, Compressor, Java Jx1, C# Nx1, and the retired compressor
+   experiments), derived from Einar Saukas' optimal C compressor - is
+   available under the BSD 3-Clause License below. In practice this is
+   relevant only if you modify its source code and/or incorporate the
+   compressor within your own products; if you just execute it to compress
+   files, you can simply ignore these conditions.
 
-2. THE DECOMPRESSORS - the Java and C# Decompressor/Djx1 implementations, the
-   68000 decompressors in 68k/ (jx1_68000.S and jx1_68000_ring.S), and the
-   retired decompressor variants in retired/68k/ (including
-   jx1_68000_ring_mod.S) - can be used freely within your own programs (for
-   any platform), even for commercial releases. The only condition is that
-   you must indicate somehow in your documentation that you have used
-   ZX1/jx1.
+2. THE DECOMPRESSORS - Java Decompressor/Djx1, C# Decompressor/Dnx1, the ST1
+   decompressors in 68k/ (ST1.S and ST1_ring.S), and the retired decompressor
+   variants in retired/68k/ (including jx1_68000_ring_mod.S) - can be used
+   freely within your own programs (for any platform), even for commercial
+   releases. The only condition is that you must indicate somehow in your
+   documentation that you have used ZX1, via jx1, nx1, or ST1.
 
 Attribution
 -----------
@@ -30,19 +29,19 @@ Attribution
   original C and z80 sources are vendored unmodified under c/zx1/ with their
   own LICENSE.
 * The additions and differences to the original (custom buffer/backreference
-  sizes, the incremental ring buffer, resumable decompression, the 68000
+  sizes, the incremental ring buffer, resumable decompression, the ST1/68000
   target, and the direction of the optimization campaign - see README.md) are
   Copyright (c) 2026 Robbert van Dalen.
-* The Java port, 68000 decompressor variants, emulation/measurement rigs, and
+* The Java port, ST1/68000 decompressor variants, emulation/measurement rigs, and
   retired optimization documentation were written by Claude (Anthropic's
-  Claude Code); the C# port was written by OpenAI Codex. Both were developed
+  Claude Code); the C# nx1 port was written by OpenAI Codex. Both were developed
   under the direction of Robbert van Dalen.
 
 BSD 3-Clause License (the compressor)
 -------------------------------------
 
 Copyright (c) 2021, Einar Saukas (original ZX1)
-Copyright (c) 2026, Robbert van Dalen (jx1 additions)
+Copyright (c) 2026, Robbert van Dalen (jx1/nx1/ST1 additions)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

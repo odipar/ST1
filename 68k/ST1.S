@@ -1,24 +1,24 @@
 ; -----------------------------------------------------------------------------
-; jx1_68000.S - JX1: resumable ZX1 decompressor for the 68000
+; ST1.S - ST1: resumable ZX1 decompressor for the Atari ST (68000)
 ;
 ; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas (data compression
 ; format, algorithm, and the original C/z80 decompressors). Code and the
 ; optimization work behind it written by Claude (Anthropic's Claude Code)
 ; under Robbert's direction. The decompressor can be used freely within
 ; your own programs, even commercially, as long as your documentation
-; indicates that you used ZX1/jx1 (see LICENSE).
+; indicates that you used ZX1 through ST1 (see LICENSE).
 ;
-; Resumable decode into a linear buffer: jx1_resume emits at most its budget
-; and resumes mid-operation; jx1_decompress drains the stream. The destination
+; Resumable decode into a linear buffer: ST1_resume emits at most its budget
+; and resumes mid-operation; ST1_decompress drains the stream. The destination
 ; is the match window and must retain all output. For bounded memory, use
-; jx1_68000_ring.S.
+; ST1_ring.S.
 ;
 ; 208 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
 ; -----------------------------------------------------------------------------
-; THE STATE IS YOUR REGISTERS. jx1_init seeds the non-pointer state; preserve
+; THE STATE IS YOUR REGISTERS. ST1_init seeds the non-pointer state; preserve
 ; all five registers between calls:
 ;
 ;   a0.l  input position
@@ -28,7 +28,7 @@
 ;   d2.w  signed offset/state: +lastOffset during LITERALS, -lastOffset during
 ;         MATCH; with d1 = 0, -1 means START and 0 means DONE
 ;
-; jx1_resume touches only these widths; their upper bits are caller-owned.
+; ST1_resume touches only these widths; their upper bits are caller-owned.
 ;
 ; Calling convention:
 ;   in and out   a0.l a1.l d0.b      the state; leave it alone between calls
@@ -46,7 +46,7 @@
 ; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
 ;
 ;   1. no single literal run or match is longer than 65535 bytes - an
-;      operation length is a word; compress with jx1 -l65535
+;      operation length is a word; compress with jx1/nx1 -l65535
 ;   2. the budget in d3.w is 1..65535
 ;
 ; TRUSTED INPUT ONLY. Stream, bounds, destination and parameters are not
@@ -56,35 +56,35 @@
 ; -----------------------------------------------------------------------------
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4/8).
-                bra.w   jx1_init
-                bra.w   jx1_decompress
-                bra.w   jx1_resume
+                bra.w   ST1_init
+                bra.w   ST1_decompress
+                bra.w   ST1_resume
 
-; jx1_init: a0 = compressed data, a1 = destination; seeds d0/d1/d2.
+; ST1_init: a0 = compressed data, a1 = destination; seeds d0/d1/d2.
 ; Java: the Decompressor constructor / reset().
-jx1_init:
+ST1_init:
         moveq   #-1,d2                  ; -lastOffset = -INITIAL_OFFSET
         moveq   #0,d1                   ; remaining = 0
         moveq   #-128,d0                ; an empty bit queue: $80 is the sentinel
         rts
 
-; jx1_decompress: a0 = compressed data, a1 = destination.
+; ST1_decompress: a0 = compressed data, a1 = destination.
 ; One-shot convenience; returns with a1 = end of output.
 ; Java: the static Decompressor.decompress() helpers.
-jx1_decompress:
-        bsr.s   jx1_init
+ST1_decompress:
+        bsr.s   ST1_init
 .drain:
         moveq   #-1,d3                  ; budget = 65535; refill for longer output
-        bsr.s   jx1_resume              ; Java: while (resume()) {}
+        bsr.s   ST1_resume              ; Java: while (resume()) {}
         tst.w   d1
         bne.s   .drain
         rts
 
-; jx1_resume: a0/a1/d0/d1/d2 = the state, d3.w = this call's budget.
+; ST1_resume: a0/a1/d0/d1/d2 = the state, d3.w = this call's budget.
 ; Emits at most d3 bytes; d1.w = 0 means done, otherwise more remains. State
 ; and a1 return updated for the next call.
 ; Java: Decompressor.resume().
-jx1_resume:
+ST1_resume:
         tst.w   d1                      ; active ops enter the copy body directly
         bne.s   op_body
         tst.w   d2                      ; d1 = 0: START is -1 and DONE is zero
