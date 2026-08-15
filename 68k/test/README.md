@@ -281,35 +281,28 @@ exactly 4 cycles off each suspension, and 2 cycles off DONE:
 
 ### Current compact register ABIs
 
-The register pass slides the common last-offset state from `d3.w` to `d2.w`,
-the budget from `d4.w` to `d3.w`, and the two data temporaries to `d4`/`d5`.
-All three decoders touch exactly `a0`–`a2` and `d0`–`d5`: `a2` is the copy
-source, `d0`–`d2` are state, and `d3`–`d5` are spent budget/scratch. The
-general ring eliminates its last bound register by packing N into `d1.high`
-and `end.low` into `d2.high` at init.
+All three decoders keep state in `a0`–`a1` and `d0`–`d2`; `a2` and
+`d3`–`d5` are scratch. The general ring packs N into `d1.high` and `end.low`
+into `d2.high`, avoiding persistent bound registers.
 
-The current pass keeps that ABI and improves both shared hot paths. Gamma
-decoding is woven into the parser: its callers seed `d4.w` with zero or one,
-and one tail installs `gamma + seed` without a `bsr`/`rts` pair. The copy
-ladder now keeps `n>>3` in `d4` and forms `n&7` in `d5` with a register AND,
-saving four cycles per copied segment and two bytes from each decoder.
-Together these changes take the linear/general-ring/`ring_mod` bodies from
-232/274/232 bytes to **220/266/224 bytes**.
+The parser decodes gamma values directly into `d1.w` and negative offsets
+directly into `d2.w`. Split literal/match tails avoid repeated state tests,
+and the ring decoders keep START/DONE dispatch out of the hot resume path.
+The resulting linear/general-ring/`ring_mod` bodies are **206/252/212 bytes**.
 
-The complete `run.sh` pass measures those ABIs below. Values are raw
-200 Hz ticks in corpus order
+The complete `run.sh` pass produced the raw 200 Hz ticks below, in corpus order
 `text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`; every correctness
 shape in the same executables also passed.
 
 | decoder | code | N/X | ST ticks |
 |---|---:|---|---|
-| linear | 220 B | —/16 | 128/146/126/155/146/136/141 |
-| general ring | 266 B | 1024/16 | 147/182/145/179/170/159/158 |
-| `ring_mod` | 224 B | 256/16 | 145/181/143/179/167/156/155 |
-| `ring_mod` | 224 B | 1024/16 | 143/177/140/172/164/153/155 |
+| linear | 206 B | —/16 | 125/140/123/152/144/133/139 |
+| general ring | 252 B | 1024/16 | 145/176/145/178/170/159/155 |
+| `ring_mod` | 212 B | 256/16 | 144/174/142/178/167/156/153 |
+| `ring_mod` | 212 B | 1024/16 | 141/171/139/172/163/153/152 |
 
 At the directly comparable 1024/16 shape, the fixed decoder remains faster
-on every corpus, by **1.9% to 3.9%**. Neither decoder has a persistent bound
+on every corpus, by **1.9% to 4.1%**. Neither decoder has a persistent bound
 register, and both leave `d6`/`d7` and `a3`–`a6` untouched.
 
 **For the modeled stages, the model holds.** Real ST decode time runs **+2.7%
