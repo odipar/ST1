@@ -64,13 +64,13 @@ the cycle counts below are spent on. Note `maxoffset` at `-m256` *expands*
 (33121 > 33012): a 256-byte window on random data is nearly all literals,
 which is exactly the ratio cost of a small ring.
 
-Both harnesses fill **the decoder-specific clobbered registers with junk
-before every `jx1_resume`**. The linear path poisons `d5`/`d6`/`a4`, the
-general ring poisons `d5`/`d6`/`a2`, and `ring_mod` poisons `d2`/`d5`/`d6`.
-The ABI promises nothing about their incoming values, so this is what a legal
-caller may look like, and a decoder that reads stale upper words is broken.
-That check is what a partial-register bug in both ring decoders escaped for
-want of, until an external audit found it.
+Both harnesses fill **the clobbered registers with junk before every
+`jx1_resume`**. All three now share the same compact ABI: `d3.w` is loaded
+with the budget after its high word is poisoned, while `d4`/`d5`/`a2` remain
+junk on entry. The ABI promises nothing about those incoming values, so this
+is what a legal caller may look like, and a decoder that reads stale upper
+words is broken. That check is what a partial-register bug in both ring
+decoders escaped for want of, until an external audit found it.
 
 ## What it checks that emulation cannot
 
@@ -106,7 +106,7 @@ hardware.
 
 Each call that leaves `d1.w` nonzero must produce exactly the chunk size —
 unless the general decoder ran into the end of the buffer, which the harness
-requires to coincide with its saved end (the decoder's preserved `d2`). The
+requires to coincide with the harness's saved end. The
 fixed decoder rejects such a short call outright. The result is reported per
 shape: **`OKf`** when every call was a full chunk, **`OKv`** when short calls
 appeared at the wrap.
@@ -262,14 +262,14 @@ under the model. The resumable entry is unchanged, so the timed rows above do
 not show it.
 
 Finally, at that stage, the last offset absorbed the operation state without
-absorbing the remaining count: negative `d3.w` means LITERALS and positive
-means MATCH; `d1.w = 0` together with `d3.w = +1/0` means START/DONE. That
-made `d2` available without adding instructions to the hot paths. The current
-register-reduction pass now uses it as the general ring's sole end bound and
-as transient match scratch in `ring_mod`; it remains untouched by the linear
-decoder. Once DONE was normalized to `d1.w = 0`, the separate 0/1 result in
-`d5` was redundant too; testing `d1` removes one `moveq` from every non-final
-call. The result at this historical step was 6 bytes off every decoder,
+absorbing the remaining count: negative `d3.w` meant LITERALS and positive
+meant MATCH; `d1.w = 0` together with `d3.w = +1/0` meant START/DONE. That
+made `d2` available without adding instructions to the hot paths. The next
+historical register-reduction pass used it as the general ring's sole end
+bound and as transient match scratch in `ring_mod`; it remained untouched by
+the linear decoder. Once DONE was normalized to `d1.w = 0`, the separate 0/1
+result in `d5` was redundant too; testing `d1` removed one `moveq` from every
+non-final call. The result at that historical step was 6 bytes off every decoder,
 exactly 4 cycles off each suspension, and 2 cycles off DONE:
 
 | | before | after | gain |
@@ -279,23 +279,30 @@ exactly 4 cycles off each suspension, and 2 cycles off DONE:
 | ring 1024/16 | 151/193/148/183/174/162/161 | 150/192/147/181/173/161/160 | +0.5% to +1.1% |
 | ring_mod 1024/16 | 145/190/141/175/166/155/153 | 145/189/140/173/165/154/152 | +0.0% to +1.1% |
 
-### Current reduced-register ring ABIs
+### Current compact register ABIs
 
-The latest complete `run.sh` pass measures the new ABIs below. Values are raw
+The latest pass slides the common last-offset state from `d3.w` to `d2.w`,
+the budget from `d4.w` to `d3.w`, and the two data temporaries to `d4`/`d5`.
+All three decoders now touch exactly `a0`–`a2` and `d0`–`d5`: `a2` is the
+copy source, `d0`–`d2` are state, and `d3`–`d5` are spent budget/scratch. The
+general ring eliminates its last bound register by packing N into `d1.high`
+and `end.low` into `d2.high` at init.
+
+The complete `run.sh` pass measures those ABIs below. Values are raw
 200 Hz ticks in corpus order
 `text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`; every correctness
 shape in the same executables also passed.
 
 | decoder | N/X | ST ticks |
 |---|---|---|
-| general ring | 1024/16 | 147/189/144/178/169/158/160 |
-| `ring_mod` | 256/16 | 149/192/145/182/170/158/156 |
-| `ring_mod` | 1024/16 | 146/188/142/175/167/155/156 |
+| linear | —/16 | 131/154/127/157/148/137/143 |
+| general ring | 1024/16 | 150/192/146/181/172/160/160 |
+| `ring_mod` | 256/16 | 148/191/144/181/169/157/158 |
+| `ring_mod` | 1024/16 | 145/187/141/174/165/154/157 |
 
 At the directly comparable 1024/16 shape, the fixed decoder remains faster
-on every corpus, by **0.5% to 2.5%**, while eliminating all persistent bound
-registers. The general decoder's only persistent bound is now `d2`; N shares
-`d1` with the remaining count, and `a3`/`a4` stay untouched.
+on every corpus, by **1.9% to 4.1%**. Neither decoder has a persistent bound
+register, and both leave `d6`/`d7` and `a3`–`a6` untouched.
 
 **For the modeled stages, the model holds.** Real ST decode time runs **+2.7%
 to +6.3%** above the

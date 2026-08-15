@@ -10,7 +10,8 @@ sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 from unicorn.unicorn_const import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0,
-                                UC_M68K_REG_D2, UC_M68K_REG_D4)
+                                UC_M68K_REG_D1, UC_M68K_REG_D2,
+                                UC_M68K_REG_D3)
 bad = []
 MOD = 'ring_mod' in (POS[0] if POS else '')
 
@@ -38,11 +39,21 @@ def audit(shapes):
                             if size >= 2 and addr & 1 else None)
             uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
             if not MOD:
-                uc.reg_write(UC_M68K_REG_D2, ring + n)
+                uc.reg_write(UC_M68K_REG_D3, ring + n)  # transient init bound
             t.call(uc, t.CODE)
+            if MOD:
+                t.seed_word_state_highs(uc)
+            else:
+                assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n
+                assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
             while True:
-                uc.reg_write(UC_M68K_REG_D4, chunk)   # the budget is per call
+                uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
                 more = t.call(uc, t.CODE + 4)
+                if MOD:
+                    t.assert_word_state_highs(uc)
+                else:
+                    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n
+                    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
                 if uc.reg_read(UC_M68K_REG_A1) == ring + n:
                     uc.reg_write(UC_M68K_REG_A1, ring)  # ring_mod needs this of
                 if more == 0:                           # its caller; a no-op for

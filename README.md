@@ -69,7 +69,7 @@ where the output goes and in what the caller has to promise:
 | File | Code | Output | Entries |
 |---|---|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 232 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 258 B | an arbitrarily placed caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 274 B | an arbitrarily placed caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
 | [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 232 B | a compile-time power-of-two ring, aligned to N, when N is a multiple of one fixed budget X | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
@@ -122,17 +122,18 @@ resume loop just leaves them alone between calls.
 | `a1.l` | write pointer — where the output ends, after every call |
 | `d0.b` | bit queue |
 | `d1.w` | bytes remaining in the current operation |
-| `d3.w` | signed last offset: negative in LITERALS, positive in MATCH; with `d1.w = 0`, `+1` is START and `0` is DONE |
+| `d2.w` | signed last offset: negative in LITERALS, positive in MATCH; with `d1.w = 0`, `+1` is START and `0` is DONE |
 
 The linear and `ring_mod` decoders never look above `d0`'s low byte or
-`d1`/`d3`'s low words, so after initialization the rest is your business. The
-general ring is the one exception: `jx1_init` packs N into `d1`'s high word,
-which must then survive along with the remaining count in its low word.
+`d1`/`d2`'s low words, so after initialization the rest is your business. The
+general ring is the one exception: `jx1_init` packs N into `d1.high` and the
+low word of the end address into `d2.high`; both full longs must then survive.
 
 For the linear and `ring_mod` decoders, `jx1_init` takes the stream in `a0`
 and the destination in `a1`, and seeds the other three registers. The general
-ring also takes its one-past-end pointer in `d2`; initialization derives and
-packs N from `d2-a1`. Each `jx1_resume` emits at most `d4.w` bytes and leaves
+ring also takes its one-past-end pointer transiently in `d3.l`; initialization
+derives and packs everything it needs. Each `jx1_resume` emits at most `d3.w`
+bytes and leaves
 `d1.w = 0` once the stream is fully processed, nonzero while more remains. The
 budget is a **parameter, not state**, so pass it every call. Linear and
 general-ring callers may vary it, or hand over a whole 65535 at once;
@@ -142,9 +143,9 @@ call:
 ```
         lea     stream,a0               ; compressed data
         lea     output,a1               ; destination
-        bsr     jx1_init                ; seeds d0/d1/d3; writes no memory
+        bsr     jx1_init                ; seeds d0/d1/d2; writes no memory
 .loop:
-        moveq   #16,d4                  ; at most 16 bytes from this call
+        moveq   #16,d3                  ; at most 16 bytes from this call
         bsr     jx1_resume
         ; ... your own work here; a1 = end of output so far ...
         tst.w   d1
@@ -152,35 +153,34 @@ call:
 ```
 
 The only rule is the obvious one: whatever your own work does, it must leave
-`a0`, `a1`, `d0`, `d1`, and `d3` as it found them, since those *are* the
-decompressor. The general ring also requires its preserved `d2` end bound to
-survive between calls.
+`a0`, `a1`, `d0`, `d1`, and `d2` as it found them, since those *are* the
+decompressor.
 
-`d4.w` is the input budget in every case and is **spent** by the call. The
-remaining register contract differs deliberately by output strategy:
+`d3.w` is the input budget in every case and is **spent** by the call. The
+register contract is deliberately uniform:
 
 | decoder | extra input or state | **clobbered** | untouched |
 |---|---|---|---|
-| linear | none | **`d4.w` `d5.l` `d6.l` `a4.l`** | `d2` `d7` `a2` `a3` `a5` `a6` |
-| general ring | `d2.l` = end, read-only; `d1.high` = N after init | **`d4.w` `d5.l` `d6.l` `a2.l`** | `d7` `a3` `a4` `a5` `a6` |
-| `ring_mod` | assembly-time `RING_SIZE` | **`d2.l` `d4.w` `d5.l` `d6.l`** | `d7` `a2` `a3` `a4` `a5` `a6` |
+| linear | none | **`d3.w` `d4.l` `d5.l` `a2.l`** | `d6` `d7` `a3` `a4` `a5` `a6` |
+| general ring | init-only `d3.l` = end; then `d1.high` = N and `d2.high` = end.low | **`d3.w` `d4.l` `d5.l` `a2.l`** | `d6` `d7` `a3` `a4` `a5` `a6` |
+| `ring_mod` | assembly-time `RING_SIZE` | **`d3.w` `d4.l` `d5.l` `a2.l`** | `d6` `d7` `a3` `a4` `a5` `a6` |
 
 All three leave the stack beyond the return address untouched. The common
-state remains in `a0`/`a1` and `d0`/`d1`/`d3`; only the general ring extends
-it with the packed size and preserved end pointer. Its copy source is
-transient `a2`. `ring_mod` instead borrows `a0` as the copy source during a
-match and parks the compressed-input pointer in `d2`, leaving `a2` through
-`a4` completely untouched.
+state is exactly `a0`/`a1` and `d0`/`d1`/`d2`. All three use transient `a2`
+as the copy source and touch data registers contiguously from `d0` through
+`d5`; there are no register-number gaps. Only the general ring extends the
+two word-sized state registers into their high words for packed metadata.
 
-`d5` and `d6` are working registers throughout — `d5` carries the segment
-length and the copy-ladder index, `d6` the gamma value — so treat both as
+`d4` and `d5` are working registers throughout — `d4` carries the segment
+length and the copy-ladder index, `d5` the gamma value — so treat both as
 gone across a call. The remaining count already in `d1` doubles as the result.
 
-`d3` holds the last offset and operation state together: its magnitude is the
+`d2` holds the last offset and operation state together: its magnitude is the
 offset, and its sign distinguishes LITERALS from MATCH at no extra cost. It
-still does not share a register with the remaining count: reaching a packed
-offset costs a `swap` pair on every match segment, which is 0.11 to 0.40 swaps
-per output byte across the benchmark corpora.
+does not share a register with the remaining count, so all three decoders use
+the offset directly from `d2.w`. Only the general ring swaps `d2` temporarily
+on a match segment to reach packed `end.low` in its high word, restoring the
+offset before the wrap subtraction.
 
 `jx1_decompress` (a0 = stream, a1 = destination) is the one-shot convenience:
 it runs the whole stream and returns with `a1` at the end of the output. It
@@ -199,8 +199,8 @@ The Java `Decompressor` streams output through a caller-supplied ring buffer,
 so memory use is bounded by the buffer rather than by the output. Two files
 carry that to the 68000: [jx1_68000_ring.S](68k/jx1_68000_ring.S) takes any
 buffer and budget, and
-[jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) trades generality for fewer
-registers when a fixed budget divides a power-of-two, size-aligned buffer.
+[jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) trades generality for less
+ring arithmetic when a fixed budget divides a power-of-two, size-aligned buffer.
 They share the parser and copy ladder, but deliberately have different ring
 ABIs.
 
@@ -210,25 +210,26 @@ done and nonzero when more remains, and neither has a context block. Their
 bounded buffer has to be drained.
 
 The general ring accepts any placement, any N from 1 through 65535, and any
-nonzero word budget. It represents the ring with one preserved value instead
-of two address registers: `d2.l` is the one-past-end pointer, while
-`jx1_init` derives N from `d2-a1` and packs it into `d1.high`. The low word of
-`d1` remains the operation count and return value. `a2` is then free to be the
-transient copy source; `a3` and `a4` are untouched.
+nonzero word budget. It needs no persistent bound register: `jx1_init` takes
+the end once in `d3.l`, derives N from `d3-a1`, and packs N into `d1.high`
+and `end.low` into `d2.high`. Their low words remain the common remaining
+count and last-offset state. `a2` is the transient copy source; `d6`/`d7` and
+`a3` through `a6` are untouched.
 
 ```
         lea     stream,a0
-        lea     ring,a3                 ; optional caller-held start; preserved
+        lea     ring,a3                 ; caller-held start; preserved
+        lea     ring+4096,a4            ; caller-held end; preserved
         movea.l a3,a1                   ; N bytes; no alignment requirement
-        move.l  #ring+4096,d2            ; sole decoder bound: one past the end
-        bsr     jx1_init                ; also packs N into d1.high
+        move.l  a4,d3                   ; init-only end parameter
+        bsr     jx1_init                ; packs N/end.low in the state highs
 .loop:
         move.l  a1,-(sp)                ; first output byte for this call
-        moveq   #16,d4                  ; at most 16 bytes from this call
+        moveq   #16,d3                  ; at most 16 bytes from this call
         bsr     jx1_resume
         movea.l (sp)+,a2                ; a2 is already caller-clobbered
         ; consume [a2 .. a1)
-        cmpa.l  d2,a1                   ; buffer full?
+        cmpa.l  a4,a1                   ; buffer full?
         bne.s   .more
         movea.l a3,a1                   ; wrap explicitly before saving a1
 .more:
@@ -236,20 +237,19 @@ transient copy source; `a3` and `a4` are untouched.
         bne.s   .loop
 ```
 
-The decoder also accepts `a1 == d2` and wraps it itself at the next entry by
-subtracting the packed N. The explicit wrap above is useful because a caller
-that saves the beginning of every produced span must normalize `a1` before
-saving it again. With arbitrary N/X, a boundary call may be shorter than its
-budget, so the saved pointer—not an assumed X—is the reliable span start.
+The decoder also accepts `a1` left at the end and wraps it itself at the next
+entry by subtracting packed N. The explicit wrap above is useful because a
+caller that saves the beginning of every produced span must normalize `a1`
+before saving it again. With arbitrary N/X, a boundary call may be shorter
+than its budget, so the saved pointer—not an assumed X—is the reliable span
+start.
 
-The match path needs a source bound only when `dst-offset` underflows the
-ring. If it does not underflow, the source lies behind the already-clamped
-destination and therefore cannot reach the end first. If it does, the
-unsigned borrow gives the exact room of the wrapped source. This makes the
-common nonwrapping source setup 12 cycles cheaper than the former two-bound
-form while reducing the persistent bounds from `a2/a3` to `d2` alone. The
-258-byte result is 12 bytes larger because reconstructing a full 1..65535 N
-without relying on signed address arithmetic takes a few extra instructions.
+The match path uses the low-word identity `position = N + destination - end`.
+Because N is at most 65535, both destination room and position are exact
+modulo 65536 even when the ring crosses a 64-K boundary. The borrow from
+`position-offset` identifies a wrapped source; adding zero-extended N to its
+raw address brings it back into the ring. Packing the last bound into existing
+state costs no persistent register and makes the general decoder 274 bytes.
 
 The ring's work is still **per call and per match segment, never per byte**:
 one destination clamp at entry, and a source recompute only for matches.
@@ -278,11 +278,11 @@ bounds from the decoder: the destination position is simply
 `a1 & (RING_SIZE-1)`, and the carry from `position-offset` says whether the
 match source wrapped.
 
-The copy uses only two address registers. Literals consume input directly
-through `a0`; for a match, the compressed-input pointer moves temporarily to
-`d2` and `a0` becomes the source alongside destination `a1`. Thus `a2`, `a3`
-and `a4` are all untouched. Nine registers are touched in total, down from
-eleven in the runtime two-bound implementation, for a 232-byte decoder.
+The copy uses `a2` as its transient source for both literals and matches, just
+like the other two decoders. Together they now share one compact allocation:
+addresses `a0` through `a2`, state `d0` through `d2`, and spent budget/scratch
+`d3` through `d5`. Nine registers are touched in total, with no gaps, for a
+232-byte fixed-ring decoder.
 
 Assemble the source with `RING_SIZE` defined, place the ring at a matching
 alignment, and keep its base in any preserved register if the drain loop
@@ -291,23 +291,23 @@ needs it:
 ```
         ; assemble with RING_SIZE=4096; ring is 4096-byte aligned
         lea     stream,a0
-        lea     ring,a2                 ; caller-owned base; a2 is preserved
-        movea.l a2,a1
+        lea     ring,a3                 ; caller-owned base; a3 is preserved
+        movea.l a3,a1
         bsr     jx1_init
 .loop:
-        moveq   #16,d4                  ; fixed X, and X divides RING_SIZE
+        moveq   #16,d3                  ; fixed X, and X divides RING_SIZE
         bsr     jx1_resume
-        moveq   #16,d6
-        sub.w   d4,d6                   ; bytes emitted = requested - unspent
+        moveq   #16,d5
+        sub.w   d3,d5                   ; bytes emitted = requested - unspent
         movea.l a1,a4
-        suba.l  d6,a4                   ; first output byte for this call
+        suba.l  d5,a4                   ; first output byte for this call
         ; consume [a4 .. a1)
         tst.w   d1
         beq.s   .done
-        move.w  a1,d6
-        and.w   #RING_SIZE-1,d6         ; aligned end has position zero
+        move.w  a1,d5
+        and.w   #RING_SIZE-1,d5         ; aligned end has position zero
         bne.s   .loop
-        movea.l a2,a1                   ; full and drained: wrap for next call
+        movea.l a3,a1                   ; full and drained: wrap for next call
         bra.s   .loop
 .done:
 ```

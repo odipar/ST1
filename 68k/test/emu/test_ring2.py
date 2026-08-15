@@ -28,13 +28,17 @@ t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
-                                UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_D5,
+                                UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A5,
+                                UC_M68K_REG_D5,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# The fixed ring has no bound registers.  d2 is the match-time saved input
-# pointer; a2-a4 are all promised untouched.
-CLOBBERED = (UC_M68K_REG_D2, UC_M68K_REG_D5, UC_M68K_REG_D6)
+# The fixed ring has no bound registers. a2 is its transient copy source;
+# d6/d7 and a3-a6 are promised untouched.
+CLOBBERED = (UC_M68K_REG_D4, UC_M68K_REG_D5, UC_M68K_REG_A2)
+PRESERVED = {UC_M68K_REG_D6: 0xD6D61234, UC_M68K_REG_D7: 0xFEEDFACE,
+             UC_M68K_REG_A3: 0x00030234, UC_M68K_REG_A4: 0x00040234,
+             UC_M68K_REG_A5: 0x00050234, UC_M68K_REG_A6: 0xCAFEBABE}
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
 
 
@@ -69,11 +73,9 @@ def run_ring(compressed, expected, n, chunk, ring):
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
     t.call(uc, ENTRY_INIT)
-    uc.reg_write(UC_M68K_REG_A2, 0x00020234)
-    uc.reg_write(UC_M68K_REG_A3, 0x00030234)
-    uc.reg_write(UC_M68K_REG_A4, 0x00040234)
-    uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
-    uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
+    t.seed_word_state_highs(uc)
+    for reg, canary in PRESERVED.items():
+        uc.reg_write(reg, canary)
 
     out = bytearray()
     prev, calls = ring, 0
@@ -82,8 +84,9 @@ def run_ring(compressed, expected, n, chunk, ring):
         assert calls < 20 + 4 * (len(expected) // max(1, min(chunk, n)) + 1), 'runaway'
         for reg in CLOBBERED:               # the ABI calls these clobbered, so
             uc.reg_write(reg, 0xBEEF0000)   # a caller may pass anything in them
-        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
+        uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)  # low word is the budget
         r = t.call(uc, ENTRY_RESUME)            # parameter, not state
+        t.assert_word_state_highs(uc)
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         emitted = dst - prev
         assert 0 <= emitted <= chunk, \
@@ -98,15 +101,15 @@ def run_ring(compressed, expected, n, chunk, ring):
         else:
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_A2) == 0x00020234, 'a2 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A3) == 0x00030234, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A4) == 0x00040234, 'a4 clobbered'
+        for reg, canary in PRESERVED.items():
+            assert uc.reg_read(reg) == canary, 'preserved register clobbered'
         if r == 0:
             break
         assert r > 0, f'bad remaining count {r}'
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
-    assert uc.reg_read(UC_M68K_REG_D7) == 0xFEEDFACE, 'd7 clobbered'
-    assert uc.reg_read(UC_M68K_REG_A6) == 0xCAFEBABE, 'a6 clobbered'
+    t.assert_word_state_highs(uc)
+    for reg, canary in PRESERVED.items():
+        assert uc.reg_read(reg) == canary, 'preserved register clobbered after DONE'
     consumed = read_high[0] - t.SRC          # every byte of the stream, and
     assert consumed == len(compressed), (     # not one byte past it
         f'read {consumed} of {len(compressed)} input bytes')

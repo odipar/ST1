@@ -1,9 +1,10 @@
 """Differential test for the general zero/nonzero-result ring decompressor.
 
 The caller drains after every call and spots the wrap itself: the write
-pointer never wraps mid-call, so "a1 == d2" means the buffer is full.  Tests
-exercise both legal handoffs: caller-wrapped a1, and end-valued a1 for the
-decoder to wrap on its next entry.
+pointer never wraps mid-call, so "a1 == ring end" means the buffer is full.
+The end's low word is packed into d2.high at init. Tests exercise both legal
+handoffs: caller-wrapped a1, and end-valued a1 for the decoder to wrap on its
+next entry.
 """
 import sys, importlib.util
 from pathlib import Path
@@ -28,13 +29,17 @@ t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
-                                UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_D5,
+                                UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A5,
+                                UC_M68K_REG_D5,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# d2 is the sole, preserved ring bound.  a2 is the decoder's copy pointer;
-# a3/a4 are deliberately canaried below because the new ABI frees both.
-CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6, UC_M68K_REG_A2)
+# d1.high holds N and d2.high the end address's low word. a2 is the transient
+# copy pointer; d6/d7 and a3-a6 are deliberately canaried as preserved.
+CLOBBERED = (UC_M68K_REG_D4, UC_M68K_REG_D5, UC_M68K_REG_A2)
+PRESERVED = {UC_M68K_REG_D6: 0xD6D61234, UC_M68K_REG_D7: 0xFEEDFACE,
+             UC_M68K_REG_A3: 0x00030234, UC_M68K_REG_A4: 0x00040234,
+             UC_M68K_REG_A5: 0x00050234, UC_M68K_REG_A6: 0xCAFEBABE}
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
 
 def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
@@ -55,13 +60,16 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     read_high = t.track_source_reads(uc, t.SRC)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
-    uc.reg_write(UC_M68K_REG_D2, ring + n)           # sole ring bound, present
-                                                     # when init derives N
+    end = ring + n
+    uc.reg_write(UC_M68K_REG_D3, end)                # transient init parameter;
+                                                     # resume has no bound input
     t.call(uc, ENTRY_INIT)
-    uc.reg_write(UC_M68K_REG_A3, 0x00030234)
-    uc.reg_write(UC_M68K_REG_A4, 0x00040234)
-    uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
-    uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'init did not pack N in d1.high'
+    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
+        'init did not pack end.low in d2.high'
+    t.seed_d0_high(uc)
+    for reg, canary in PRESERVED.items():
+        uc.reg_write(reg, canary)
 
     out = bytearray()
     prev, calls = ring, 0
@@ -70,8 +78,9 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         assert calls < 20 + 4 * (len(expected) // max(1, min(chunk, n)) + 1), 'runaway'
         for reg in CLOBBERED:               # the ABI calls these clobbered, so
             uc.reg_write(reg, 0xBEEF0000)   # a caller may pass anything in them
-        uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
+        uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)  # low word is the budget
         r = t.call(uc, ENTRY_RESUME)            # parameter, not state
+        t.assert_d0_high(uc)
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
         emitted = dst - prev
         assert 0 <= emitted <= chunk, \
@@ -88,15 +97,20 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
         assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N in d1.high changed'
-        assert uc.reg_read(UC_M68K_REG_D2) == ring + n, 'd2 bound clobbered'
-        assert uc.reg_read(UC_M68K_REG_A3) == 0x00030234, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A4) == 0x00040234, 'a4 clobbered'
+        assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
+            'packed end.low in d2.high changed'
+        for reg, canary in PRESERVED.items():
+            assert uc.reg_read(reg) == canary, 'preserved register clobbered'
         if r == 0:
             break
         assert r > 0, f'bad remaining count {r}'
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
-    assert uc.reg_read(UC_M68K_REG_D7) == 0xFEEDFACE, 'd7 clobbered'
-    assert uc.reg_read(UC_M68K_REG_A6) == 0xCAFEBABE, 'a6 clobbered'
+    t.assert_d0_high(uc)
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed after DONE'
+    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
+        'packed end.low changed after DONE'
+    for reg, canary in PRESERVED.items():
+        assert uc.reg_read(reg) == canary, 'preserved register clobbered after DONE'
     consumed = read_high[0] - t.SRC          # every byte of the stream, and
     assert consumed == len(compressed), (     # not one byte past it
         f'read {consumed} of {len(compressed)} input bytes')

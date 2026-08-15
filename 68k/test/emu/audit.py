@@ -43,27 +43,28 @@ for f in FILES:
               else ['jx1_init', 'jx1_resume'])
     check(slots == expect, f'{f}: jump table {slots} vs documented {expect}')
 
-# 4. the budget is a per-call parameter in d4.w, not a field and not state
+# 4. the budget is a per-call parameter in d3.w, not a field and not state
 for f in FILES:
     src = (K68 / f).read_text()
     check('d0.w = chunk size' not in src, f'{f}: init no longer takes a chunk')
-    check("d4.w = this call's budget" in src, f'{f}: resume documents the budget in d4.w')
-    check('the budget in d4.w is 1..65535' in src, f'{f}: the budget range is stated')
+    check("d3.w = this call's budget" in src, f'{f}: resume documents the budget in d3.w')
+    check('the budget in d3.w is 1..65535' in src, f'{f}: the budget range is stated')
 
 # 5. the state encoding the entry dispatch relies on
 for f in FILES:
     src = (K68 / f).read_text()
     # init writes nothing: it seeds the three registers that are not pointers.
-    # The sign of lastOffset is the active-op state; d1/d3 encode START/DONE.
+    # The sign of lastOffset is the active-op state; d1/d2 encode START/DONE.
     check('moveq   #-128,d0' in src, f'{f}: init seeds the bit queue with $80')
-    check('moveq   #1,d3' in src, f'{f}: init encodes START with lastOffset = +1')
+    check(re.search(r'(?:moveq|move\.w|addq\.w)\s+#1,d2', src),
+          f'{f}: init encodes START with lastOffset = +1')
     check('tst.w   d1' in src and 'beq.s   entry_special' in src,
           f'{f}: zero remaining dispatches START/DONE')
-    check(src.count('neg.w   d3') == 2,
+    check(src.count('neg.w   d2') == 2,
           f'{f}: lastOffset sign flips exactly at both LITERALS/MATCH transitions')
-    check('tst.w   d3' in src, f'{f}: active-op dispatch tests signed lastOffset')
+    check('tst.w   d2' in src, f'{f}: active-op dispatch tests signed lastOffset')
     end = src[src.index('end_marker:'):]
-    check('clr.w   d1' in end and 'clr.w   d3' in end,
+    check('clr.w   d1' in end and 'clr.w   d2' in end,
           f'{f}: DONE normalizes remaining and lastOffset for repeat polling')
     offset_head = src[src.index('new_offset:'):src.index('two_byte:')]
     check('moveq   #0,d1' not in offset_head and 'clr.w   d1' not in offset_head,
@@ -153,41 +154,66 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    check('d3.w  signed last offset' in src, f'{f}: the header maps the folded state')
+    state_words = ('signed last offset in the low word' if f == FILES[1]
+                   else 'd2.w  signed last offset')
+    check(state_words in src, f'{f}: the header maps the folded state')
 linear_body = '\n'.join(l for l in (K68 / FILES[0]).read_text().splitlines()
                         if not l.lstrip().startswith(';'))
 ring_body = '\n'.join(l for l in (K68 / FILES[1]).read_text().splitlines()
                       if not l.lstrip().startswith(';'))
 mod_body = '\n'.join(l for l in (K68 / FILES[2]).read_text().splitlines()
                      if not l.lstrip().startswith(';'))
-check(not re.search(r'^\s+.*\bd2\b', linear_body, re.M),
-      'linear decoder leaves d2 untouched')
-check(re.search(r'^\s+.*\bd2\b', ring_body, re.M) and
-      not re.search(r'^\s+.*\ba[34]\b', ring_body, re.M),
-      'general ring uses d2/a2 and leaves a3/a4 untouched')
-check(re.search(r'^\s+.*\bd2\b', mod_body, re.M) and
-      not re.search(r'^\s+.*\ba[234]\b', mod_body, re.M),
-      'ring_mod uses d2 and leaves a2-a4 untouched')
+for f, body in zip(FILES, (linear_body, ring_body, mod_body)):
+    check(re.search(r'^\s+.*\bd2\b', body, re.M), f'{f}: d2 holds lastOffset/state')
+    check(re.search(r'^\s+.*\ba2\b', body, re.M), f'{f}: a2 is the copy source')
+    check(not re.search(r'^\s+.*\bd6\b', body, re.M), f'{f}: d6 is untouched')
+    check(not re.search(r'^\s+.*\ba[3-6]\b', body, re.M),
+          f'{f}: a3-a6 are untouched')
+
+# Linear and ring_mod expose only d1.w/d2.w. Their caller-owned upper halves
+# must never become accidental scratch on resume. The general ring deliberately
+# uses both highs for N and end.low, so it is excluded from this width check.
+for f in (FILES[0], FILES[2]):
+    src = (K68 / f).read_text()
+    resume = src[src.index('jx1_resume:'):]
+    wide = re.findall(r'^\s+(?:\w+\.l\s+[^;]*\bd[12]\b|swap\s+d[12]\b)',
+                      resume, re.M)
+    check(not wide, f'{f}: resume leaves d1.high/d2.high untouched ({wide})')
+
+# d0 exposes only its low byte as state in every decoder. Init may seed the
+# whole register, but resume must preserve the caller-owned upper 24 bits.
+for f in FILES:
+    src = (K68 / f).read_text()
+    resume = src[src.index('jx1_resume:'):]
+    d0_ops = re.findall(r'^\s+(\w+(?:\.[bwl])?)\s+[^;\n]*\bd0\b', resume, re.M)
+    wide = [op for op in d0_ops if not op.endswith('.b')]
+    check(bool(d0_ops) and not wide,
+          f'{f}: resume touches d0 only with byte operations ({d0_ops})')
+
+# The general ring consumes its end pointer only at init, packing N into
+# d1.high and end.low into d2.high; resume has no persistent bound register.
+ring_src = (K68 / FILES[1]).read_text()
+ring_init = ring_src[ring_src.index('jx1_init:'):ring_src.index('entry_special:')]
+check(re.search(r'\bd3\b', ring_init) and re.search(r'\bd2\b', ring_init) and
+      'swap    d2' in ring_init,
+      'general ring init packs transient d3 end.low into d2.high')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
-# The three ABIs intentionally expose different scratch registers.
-clobbers = {
-    'jx1_68000.S': ('CLOBBERED    d4.w d5.l d6.l', 'a4.l'),
-    'jx1_68000_ring.S': ('CLOBBERED    d4.w d5.l d6.l', 'a2.l'),
-    'jx1_68000_ring_mod.S': ('CLOBBERED    d2.l d4.w d5.l d6.l', None),
-}
-for f, (words, addr) in clobbers.items():
+# All three ABIs expose the same compact, gap-free scratch set.
+for f in FILES:
     src = (K68 / f).read_text()
-    check(words in src and (addr is None or addr in src),
-          f'{f}: names its decoder-specific clobbered set')
+    header = src[:src.index('TRUSTED INPUT ONLY')]
+    clobbers = re.search(r'CLOBBERED\s+d3\.w\s+d4\.l\s+d5\.l[\s\S]{0,80}\ba2\.l',
+                         header)
+    check(bool(clobbers), f'{f}: names d3/d4/d5/a2 as its clobbered set')
 
 # The calling sequences in the README are code a reader will copy, so they have
 # to use the registers the decoders actually use.
 for block in re.findall(r'```\n(        lea     stream.*?)```', readme, re.S):
     check('bsr     jx1_resume' in block, 'README example calls jx1_resume')
     check('tst.w   d1' in block, 'README example tests remaining/result in d1')
-    check(re.search(r'moveq   #\d+,d4', block), 'README example passes the budget in d4')
+    check(re.search(r'moveq   #\d+,d3', block), 'README example passes the budget in d3')
     check('tst.w   d0' not in block, 'README example does not test the old return register')
 
 # 13. the operation-length contract, stated identically in all three headers and

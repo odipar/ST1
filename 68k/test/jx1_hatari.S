@@ -152,10 +152,8 @@ t_resume:
         lea     m_eq,a0
         bsr     puts
         bsr     run_resume_poison
-        move.l  a1,d0                           ; a1 = the end of the output. The
-                                                ; context field is not written on
-                                                ; the final call: once the state
-                                                ; byte says DONE the rest is dead
+        move.l  a1,d0                           ; a1 is the end of the output when
+                                                ; the d0-d2 state reports DONE
         sub.l   #dst_buf,d0
         lea     dst_buf,a0
         bra     verify
@@ -165,23 +163,24 @@ t_resume:
 run_resume:
         bsr     resume_setup
 .loop:
-        move.w  d7,d4                           ; the budget is a parameter now
+        move.w  d7,d3                           ; the budget is a parameter now
         bsr     jx1_resume
         tst.w   d1
         bne.s   .loop
         rts
 
 ; run_resume_poison: the same, but fills the caller-clobbered registers with
-; junk before every call. d5/d6/a4 are what the ABI still calls clobbered -
-; the parse state lives in a0/a1/d0/d1/d3 between calls now, and d4 is
+; junk before every call. d4/d5/a2 are what the ABI calls scratch - the parse
+; state lives in a0/a1/d0-d2 between calls now, and d3.w is
 ; the budget - so this is what a legal caller may look like.
 run_resume_poison:
         bsr     resume_setup
 .loop:
-        move.l  #$BEEF0000,d5
-        move.l  d5,d6
-        movea.l d5,a4
-        move.w  d7,d4
+        move.l  #$BEEF0000,d3                   ; poison the budget's ignored
+        move.l  d3,d4                           ; high word and every scratch
+        move.l  d3,d5
+        movea.l d3,a2
+        move.w  d7,d3
         bsr     jx1_resume
         tst.w   d1
         bne.s   .loop
