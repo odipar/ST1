@@ -21,6 +21,7 @@ python3 68k/test/emu/poison.py jx1_68000.bin linear
 python3 68k/test/emu/poison.py jx1_68000_ring.bin
 python3 68k/test/emu/poison.py jx1_68000_ring_mod.bin
 python3 68k/test/emu/audit.py                 # doc-vs-code claims
+python3 68k/test/emu/cycle_model.py --check   # current ideal-cycle tables
 python3 68k/test/emu/compat.py                # jx1 vs the original C zx1
 ```
 
@@ -94,7 +95,9 @@ budgets.
   jump-table slots against the documented entries, fixed-ring shape/alignment
   declarations, no `cmp.l` on a data register, no wider-than-byte `d0` access
   during resume, the state encoding the entry dispatch relies on, and that the
-  harnesses still poison and still fail on `BAD`.
+  harnesses still poison and still fail on `BAD`. It also rejects timing tables
+  whose decoder, compressor, corpus, model or hardware-harness inputs changed;
+  `cycle_model.py --check` reruns the full instruction trace.
 
 The hardware harness in the parent directory covers what emulation cannot:
 real 68000 timing, and address errors actually faulting.

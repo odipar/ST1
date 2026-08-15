@@ -16,6 +16,7 @@ TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 # byte for byte without it, but it costs nothing and the next such operand
 # would otherwise cost two bytes silently.
 python3 gendata.py
+printf 'TIMING_INPUT %s\n' "$(python3 emu/cycle_model.py --fingerprint)"
 rmac -m68000 -p +o3 -i. -i.. -o JX1TEST.PRG jx1_hatari.S                  # linear
 rmac -m68000 -p +o3 -dRINGMOD=0 -i. -i.. -o JX1RING.PRG jx1_hatari_ring.S  # ring
 rmac -m68000 -p +o3 -dRINGMOD=1 -dRING_SIZE=256 -i. -i.. \
