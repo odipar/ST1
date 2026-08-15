@@ -1,182 +1,159 @@
-# ST1 — ZX1 decompression for the Atari ST
+# ST1 — streaming ZX1 decompression for the Atari ST
 
-`ST1` is the destination of this project: compact, resumable ZX1 decompressors
-for the Atari ST's Motorola 68000. They run from ROM, keep their state in
-registers, and support either linear output or a bounded ring buffer.
+Keep assets packed. Spend the RAM on the demo.
 
-## Why jx1 and nx1 exist
+ST1 is a small [ZX1](https://github.com/einar-saukas/ZX1) decompressor for the
+plain 68000. It can stop after a chosen number of output bytes and continue
+later. The ring version reuses a small buffer even when the full output is much
+larger. This makes it useful for loaders, effects, music, and other work that
+must share each video frame.
 
-The Atari ST was always the target. Before committing the decoder to assembly,
-Java `jx1` made the compressor, resumable state machine, and edge cases
-executable and easy to test; C# `nx1` mirrors that portable model independently.
-Together they are the readable specification, test oracle, asset toolchain, and
-development base behind the `ST1.S` translation. `ST1.S` remains handwritten
-and 68000-optimized rather than generated or translated line by line.
+## 68000 decoders
 
-Both workbenches are useful ports in their own right, but their role here is to
-make ST1 assets reproducible and the assembly verifiable. That is why the
-project and repository carry the target's name.
+ST1 has two versions of the same decoder. Both read normal ZX1 data, run on a
+plain 68000, and keep their current position in five registers. Your code can
+set a maximum number of output bytes, stop, do other work, and continue later.
 
-Their ST1-facing controls are:
-
-* `jx1 -mN`/`nx1 -mN` limits encoded back-references;
-  `djx1 -mN`/`dnx1 -mN` selects an N-byte decode ring and requires every
-  encoded offset to fit it.
-* `-lN` limits operation lengths; use `-l65535` for the ST1 decoders.
-* Java `Decompressor.resume()` and C# `Decompressor.Resume()` emit at most a
-  caller-selected chunk per call.
-* `Decompressor` writes through a caller-supplied ring buffer and `flip`/`Flip`
-  hook.
-
-## Same stream, different handles
-
-The naming is deliberately a little demoscene: the target signs the release.
-`ZX1` carries its ZX Spectrum initials; `jx1` is the Java workbench, `nx1` the
-.NET workbench, and `ST1` flies the Atari ST colours. Host-language tools stay
-lowercase; machine code gets the full uppercase logo. These are implementation
-names, not formats—on disk and on the wire, it is all ZX1.
-
-## Compatibility with ZX1
-
-The encoding is unchanged: every jx1 or nx1 stream is a ZX1 stream and vice
-versa. With no options, both compressors produce byte-identical output to the
-original C compressor. `-mN` changes the parse and `-lN` splits emitted
-matches; neither changes the format.
-
-[68k/test/emu/compat.py](68k/test/emu/compat.py) builds `zx1` and `dzx1` from
-[c/zx1/src](c/zx1/src), compares both compressors, cross-decompresses their
-output, and checks the ST1 decoders on a C-produced stream.
-
-The C# nx1 tests port every Java behavior test and pin the compressor to the
-same original-C golden streams, including skipped, backwards, and quick modes.
-
-## ST1 for Atari ST
-
-Both plain-68000 files are position-independent, ROM-safe, and keep their
-entire state in registers:
-
-| File | Code | Output | Entries |
+| File | Code | Use | Calls |
 |---|---:|---|---|
-| [ST1.S](68k/ST1.S) | 208 B | linear buffer containing the whole output and match window | `ST1_init`, `ST1_decompress`, `ST1_resume` |
-| [ST1_ring.S](68k/ST1_ring.S) | 266 B | arbitrary caller-supplied ring of N bytes | `ST1_init`, `ST1_resume` |
+| [ST1.S](68k/ST1.S) | 208 B | the whole output stays in one buffer | `ST1_init`, `ST1_decompress`, `ST1_resume` |
+| [ST1_ring.S](68k/ST1_ring.S) | 266 B | output passes through a ring supplied by your code | `ST1_init`, `ST1_resume` |
 
-Entries are four-byte jump slots in table order. Use the linear decoder unless
-output must pass through bounded memory; the ring decoder has no one-shot entry
-because the caller must drain it.
+Use [ST1.S](68k/ST1.S) when the whole output fits in memory. It can decode the
+whole file with one call or stop and resume. Use
+[ST1_ring.S](68k/ST1_ring.S) when memory is tight. It reuses a fixed buffer;
+your code uses each returned block before asking for more.
 
 ### Trusted input only
 
-The ST1 decoders validate nothing: not the stream, input end, destination,
-or parameters. Malformed input can read or write arbitrary memory. They are
-for trusted assets produced at build time; otherwise validate the stream and
-decompressed length first or decode it in an isolated environment.
+The decoders do not check the input, buffer, or arguments. Bad data can read or
+write outside the buffers. Use trusted files made at build time, or validate
+them before decoding.
 
-Their required contracts are:
+- Compress with `-l65535`. A longer match is split. A longer literal run cannot
+  be split; the compressor warns about it, and that file is not safe for ST1.
+- A resume limit must be from 1 to 65535. Zero makes no progress.
+- A ring may be from 1 to 65535 bytes. For a ring smaller than 32512 bytes,
+  compress that stream with the matching `-mN`.
+- Keep the input, output, and saved registers valid until decoding ends.
 
-* Each literal run or match is at most 65535 bytes. Compress with
-  `jx1 -l65535` or `nx1 -l65535`; over-long matches are split. An over-long
-  literal run is reported but cannot be split, so that output is not ST1-safe.
-* Every resume budget is in 1..65535. A zero budget makes no progress and can
-  spin a drain loop forever.
-* The ring size is 1..65535 and no stream offset exceeds it. For N below
-  32512, compress with the matching `-mN`; rings of
-  at least 32512 bytes cover the format's full offset range.
-* Input, output, and the five state registers remain valid for the full decode.
+### Calls and registers
 
-### Calling convention
+Keep these five values between calls:
 
-There is no context block. Preserve these five state registers between calls;
-after draining a full ring, `a1` may be changed from the end back to the start:
-
-| Register | Role |
+| Register | Meaning |
 |---|---|
-| `a0.l` | input position |
-| `a1.l` | write pointer; end of output produced so far |
-| `d0.b` | bit queue |
-| `d1.w` | bytes remaining; zero on return from `ST1_resume` means done |
-| `d2.w` | signed offset/state: `+lastOffset` in LITERALS, `-lastOffset` in MATCH |
+| `a0.l` | packed input position |
+| `a1.l` | output write position |
+| `d0.b` | compressed bits |
+| `d1.w` | bytes left; zero after resume means finished |
+| `d2.w` | last match distance and current step |
 
-With `d1.w = 0`, `d2.w = -1` means START and zero means DONE. After
-initialization, the linear resume entry preserves the unused high parts of
-`d0`, `d1`, and `d2`. The ring instead keeps
-`-start.low` in `d1.high` and `end.low` in `d2.high`, so its full `d1.l` and
-`d2.l` are state.
+For the ring decoder, save all of `d1.l` and `d2.l`; their upper words also
+hold the ring limits.
 
-Initialize with the stream in `a0` and destination in `a1`. Ring initialization
-additionally takes its one-past-end pointer in `d3.l`. Thereafter, every
-`ST1_resume` takes a fresh budget in `d3.w`; the call spends it rather than
-refilling it.
+To start, put the input in `a0` and the output start in `a1`, then call
+`ST1_init`. Ring setup also takes the address just after the ring in `d3.l`.
+Before every `ST1_resume`, put a fresh output limit in `d3.w`.
 
-Both clobber `d3.w`, `d4.l`, `d5.l`, and `a2.l`. They preserve `d6`,
-`d7`, `a3`–`a6`, and the stack beyond the return address.
+Both decoders may change `d3`, `d4`, `d5`, and `a2`. They leave `d6`, `d7`, and
+`a3`–`a6` unchanged.
 
-Linear example:
+The linear `ST1_decompress` call decodes the whole file. Its output buffer must
+keep all earlier output because matches may refer to it.
 
-```
-        lea     stream,a0
-        lea     output,a1
-        bsr     ST1_init
-.loop:
-        moveq   #16,d3
-        bsr     ST1_resume
-        ; consume or inspect output ending at a1
-        tst.w   d1
-        bne.s   .loop
-```
+The ring call returns new bytes between the old and new `a1`. Use those bytes
+before the next call. A call can return fewer bytes at the ring end or file end.
+After draining the ring end, move `a1` back to the ring start. The source files
+above contain complete calling examples.
 
-`ST1_decompress` is the linear one-shot convenience. It takes the stream in
-`a0`, destination in `a1`, and returns with `a1` at the output end. The linear
-destination must hold everything decompressed so far because it is also the
-match window. Polling a completed stream remains harmless and leaves
-`d1.w = 0`.
+## Example: streaming YM6
 
-### General ring
+YM6 playback is one example of why the ring decoder is useful. A 50 Hz dump of
+the YM2149's 14 sound registers uses about 41 KiB per minute, while the player
+only needs the next value for each register.
 
-[ST1_ring.S](68k/ST1_ring.S) accepts any alignment, N in
-1..65535, and a nonzero word budget that may vary between calls. Initialization
-packs the ring metadata, so no persistent bound register is needed.
+For better compression, convert the YM6 file into one byte stream per register
+before packing it:
 
-```
-        lea     stream,a0
-        lea     ring,a3                 ; caller-held start
-        lea     ring+4096,a4            ; caller-held end
-        movea.l a3,a1
-        move.l  a4,d3                   ; init-only end parameter
-        bsr     ST1_init
-.loop:
-        move.l  a1,-(sp)                ; span start
-        moveq   #16,d3
-        bsr     ST1_resume
-        movea.l (sp)+,a2
-        ; consume [a2 .. a1)
-        cmpa.l  a4,a1
-        bne.s   .more
-        movea.l a3,a1                   ; drained: wrap before next call
-.more:
-        tst.w   d1
-        bne.s   .loop
+```text
+R0:  frame 0, frame 1, frame 2, ... → ZX1 stream 0 → small buffer 0
+R1:  frame 0, frame 1, frame 2, ... → ZX1 stream 1 → small buffer 1
+...
+R13: frame 0, frame 1, frame 2, ... → ZX1 stream 13 → small buffer 13
 ```
 
-The decoder may instead receive `a1` left at the end and wrap it on the next
-entry. Explicit wrapping is safer for callers that save each produced span's
-start. A boundary call can be shorter than its requested budget, so use the
-saved and returned pointers rather than assuming X bytes were emitted.
+Values from the same register tend to repeat, so they compress much better
+together. Extra YM6 effect data can use extra streams when the player supports
+it.
 
-Destination room and `position = destination - start` are computed modulo
-65536 from the packed low words. Because N is at most 65535, both values are
-exact even when the ring crosses a 64-K boundary. A borrow from
-`position - offset` detects a wrapped match source; the rare wrap path derives
-zero-extended `N = end.low - start.low` from the same metadata.
+Start by decoding 16 values for every register. During playback, use one value
+from every current block each video frame (VBL) and refill only one register
+with its next 16 values:
 
-An N-byte ring supports offsets through `min(N, 32512)`. For N below 32512,
-compress with `-mN`; larger rings already cover the format's full range. The
-decoder clamps once at call entry and splits only a match whose source reaches
-the ring end, so bounds work is per call or match segment, not per byte.
+```text
+VBL  0: play value  0; refill R0
+VBL  1: play value  1; refill R1
+...
+VBL 13: play value 13; refill R13
+VBL 14: play value 14; free, or refill effect data
+VBL 15: play value 15; free, or refill effect data
+```
 
-### Testing
+After VBL 15, start again at R0. Each decoder setup now produces 16 useful
+values instead of one. The limit is a byte count, not a time limit, so measure
+the slowest refill for the final tune.
 
-The hardware suite assembles fresh TOS programs, verifies every output byte,
-and runs under cycle-exact Hatari or on an Atari ST:
+With a 1024-byte ring and 16-byte calls, the current tests range from about 28
+to 69 cycles per output byte, depending on the data. Using 70 cycles per byte is
+a safe first estimate: one 16-byte refill costs about `16 × 70 = 1120` cycles.
+A 16-stream player does one such refill per VBL, or about 1120 decompression
+cycles per VBL. This number does not include saving the selected stream,
+writing the YM registers, or loading packed data.
+
+For this player, use rings of at least 32 bytes with sizes divisible by 16. A
+128-byte ring holds 2.56 seconds of one register's past values at 50 Hz; 14
+rings use 1792 bytes. Put equal-sized rings next to each other and moving to the
+same place in the next ring becomes one add. With a fixed order, the player can
+also share the write position. The decoder code may be placed directly in the
+player loop so decoding, saving state, and moving to the next buffer happen
+together.
+
+ST1 only decompresses bytes. Your code must convert YM6, play the registers,
+and provide the packed input.
+
+## ST1 and MinYMiser
+
+This YM example is directly inspired by
+[MinYMiser](https://clarets.org/steve/projects/minymiser.html). Both split YM
+data by register and keep only a small amount of old output.
+
+MinYMiser uses a custom compressor made for YM music and one tight loop that
+advances all 13 stored streams every VBL; it folds the mixer register into the
+volume streams. ST1 can use the same 13-stream layout, or a simpler 14-stream
+layout. It uses ZX1 because it compresses well and has a small decoder. Each
+VBL it advances one stream by 16 values, then moves to the next stream.
+
+MinYMiser has very small saved state and reads one packed input in order. ST1
+uses separate ZX1 streams, spreads the work across VBLs, and reuses the same
+decoder for other data. Both can group equal buffers and combine the decoder
+with the player loop. Which is smaller or faster depends on the tune; a fair
+answer needs both players tested with the same input and memory limits.
+
+## Compatibility with ZX1
+
+ST1, jx1, and nx1 use the normal ZX1 format. With no options, jx1 and nx1 make
+the same bytes as the original C compressor. `-mN` changes which matches are
+chosen and `-lN` limits their length; neither changes the file format.
+
+[68k/test/emu/compat.py](68k/test/emu/compat.py) builds the original `zx1` and
+`dzx1`, compares their output with jx1, and checks that each implementation can
+read the other's files. The C# tests use the same Java and original-C examples.
+
+## Tests and speed
+
+The tests build Atari programs, check every output byte, and run with Hatari or
+on an Atari ST:
 
 ```sh
 mvn compile
@@ -184,27 +161,18 @@ HATARI=/path/to/hatari TOS=/path/to/tos.img 68k/test/run.sh
 ```
 
 <!-- 68k-timings:begin -->
-<!-- Generated by 68k/test/emu/cycle_model.py; inputs 2fe0ff39e573 -->
-Fair N=1024, X=16 resume comparison on identical `-m1024` streams.
-Linear means `ST1_resume` at X=16, not the one-shot entry. Values
-are ideal plain-MC68000 cycles for the decoder plus its required
-resume-loop control flow; the ring cell shows its cost versus linear.
+<!-- Generated by 68k/test/emu/cycle_model.py; inputs f07160960084 -->
+With N=1024 and 16-byte calls on identical `-m1024` streams, the ring
+decoder is on average about 12–13% slower than the resumable linear decoder
+on the normal compressed test cases.
 
-| corpus | linear | general ring |
-|---|---:|---:|
-| text | 11,412 | 12,780 (+12.0%) |
-| wordsoup | 177,762 | 201,586 (+13.4%) |
-| farmatch | 75,798 | 85,164 (+12.4%) |
-| period129 | 28,058 | 31,446 (+12.1%) |
-| allsame | 26,544 | 29,912 (+12.7%) |
-| rle32k | 820,984 | 934,374 (+13.8%) |
-| maxoffset | 870,344 | 918,610 (+5.5%) |
-
-The matching hardware measurements, stream-size cost, and regeneration
-command are in [68k/test/README.md](68k/test/README.md).
+The full per-case cycle table, hardware measurements, stream-size cost,
+and regeneration command are in [68k/test/README.md](68k/test/README.md).
 <!-- 68k-timings:end -->
 
-## jx1 (Java tooling)
+## Java and C# tools
+
+Build and run the Java tools:
 
 ```sh
 mvn package
@@ -212,70 +180,44 @@ java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] [-lN] input [outpu
 java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
 ```
 
-Or run through Maven, which starts a forked JVM with assertions enabled:
+`-mN` limits match distance, and `-lN` limits run length. Keep `-ea` when
+running the classes directly because input checks use Java assertions.
 
-```sh
-mvn -q compile exec:exec@jx1  -Dargs="[-f] [-b] [-q] [-mN] [-lN] input [output.zx1]"
-mvn -q compile exec:exec@djx1 -Dargs="[-f] [-mN] input.zx1 [output]"
-```
-
-Malformed-input validation uses Java `assert`, so use `-ea` when invoking the
-classes directly.
-
-The Java `Decompressor` takes compressed input, an external ring buffer, and
-optionally a chunk size X. Each `resume()` emits at most X bytes and returns
-`false` once the stream is complete:
+The Java `Decompressor` can also stop after a chosen number of bytes:
 
 ```java
 while (decompressor.resume()) {
-    // work between chunks
+    // do other work between chunks
 }
 ```
 
-When the ring fills, the abstract `flip(buffer, length)` method decides where
-its bytes go; the static `decompress` helpers collect them in memory. Instances
-have no global state and can be reset and reused.
-
-## nx1 (.NET tooling)
-
-The C# implementation targets .NET 10 and mirrors the Java API and command-line
-options:
+The C# tools have the same options and API:
 
 ```sh
-dotnet build csharp/Nx1.slnx -c Release
 dotnet run --project csharp/src/Nx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
 dotnet run --project csharp/src/Dnx1.Cli -- [-f] [-mN] input.zx1 [output]
-dotnet test csharp/Nx1.slnx -c Release
 ```
 
-For in-memory decoding, call `Nx1.Decompressor.Decompress(compressed)`. For
-bounded or resumable output, derive from `Decompressor`, implement `Flip`, and
-call `Resume` until it returns `false`. See [csharp/README.md](csharp/README.md)
-for compression, publishing, and project-layout details.
+See [csharp/README.md](csharp/README.md) for the .NET library and build steps.
 
-## Layout
+## Names and files
 
-| Component | Origin |
-|---|---|
-| `ST1` | resumable plain-68000 decoding for the Atari ST |
-| `Block`, `Optimizer` | `zx1.h`, `memory.c`, `optimize.c` |
-| `Compressor` | `compress.c` |
-| `Decompressor` | `dzx1.c`, restructured around resumable ring output |
-| `Jx1` / `Nx1` | the `zx1` tool plus `-mN` and `-lN` |
-| `Djx1` / `Dnx1` | the `dzx1` tool plus `-mN` |
+The Atari ST was always the target. Java `jx1` and C# `nx1` are the tools and
+readable reference versions used to test the handwritten `ST1.S` code. The
+names follow a small demoscene joke: `ZX1` signs the ZX Spectrum version, `ST1`
+signs the Atari ST version, and the host tools stay lowercase.
 
-ST1 assembly and hardware tooling are under [`68k/`](68k/). Its supporting Java
-sources are under `src/`; the equivalent .NET library, CLI, and tests are under
-[`csharp/`](csharp/).
-
-Tagged versions are available from [GitHub Releases](https://github.com/odipar/ST1/releases).
+Assembly and Atari tests are in [`68k/`](68k/), Java is in `src/`, and C# is in
+[`csharp/`](csharp/). Tagged builds are on
+[GitHub Releases](https://github.com/odipar/ST1/releases).
 
 ## License and attribution
 
-Dual, following the original ZX1 (see [LICENSE](LICENSE)): the compressor is
-BSD 3-Clause; the decompressors may be used freely, including commercially,
-when their documentation says ZX1 was used, via ST1, jx1, or nx1. The ZX1
-format and algorithm are by Einar Saukas. The additions are © 2026 Robbert van
-Dalen. The Java, ST1/68000, test, and optimization work was written by Claude
-(Anthropic's Claude Code); the C# nx1 port was written by OpenAI Codex. Both
-were developed under Robbert's direction.
+The license follows the original ZX1; see [LICENSE](LICENSE). The compressor is
+BSD 3-Clause. The decompressors may be used freely, including commercially, if
+their documentation says that ZX1 was used through ST1, jx1, or nx1.
+
+The ZX1 format and algorithm are by Einar Saukas. The additions are © 2026
+Robbert van Dalen. Claude (Anthropic's Claude Code) wrote the Java, ST1/68000,
+tests, and optimization work. OpenAI Codex wrote the C# nx1 port. Both were
+developed under Robbert's direction.
