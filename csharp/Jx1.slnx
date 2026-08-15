@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Jx1/Jx1.csproj" />
+    <Project Path="src/Jx1.Cli/Jx1.Cli.csproj" />
+    <Project Path="src/Djx1.Cli/Djx1.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Jx1.Tests/Jx1.Tests.csproj" />
+  </Folder>
+</Solution>

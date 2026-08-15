@@ -1,16 +1,18 @@
-# jx1 — the Java version of ZX1
+# jx1 — Java and C# versions of ZX1
 
-jx1 is a Java port of [ZX1](https://github.com/einar-saukas/ZX1) v1.5 by
-Einar Saukas. It includes compatible command-line tools, a resumable Java
-decompressor, and two small 68000 decompressors.
+jx1 ports [ZX1](https://github.com/einar-saukas/ZX1) v1.5 by Einar Saukas to
+Java and C#. It includes compatible command-line tools, resumable ring-buffer
+decompressors, and two small 68000 decompressors.
 
-The Java additions are:
+The ports add:
 
 * `jx1 -mN` limits encoded back-references; `djx1 -mN` selects an N-byte
   decode ring and requires every encoded offset to fit it.
 * `-lN` limits operation lengths; use `-l65535` for the 68000 decoders.
-* `Decompressor.resume()` emits at most a caller-selected chunk per call.
-* `Decompressor` writes through a caller-supplied ring buffer and `flip` hook.
+* Java `Decompressor.resume()` and C# `Decompressor.Resume()` emit at most a
+  caller-selected chunk per call.
+* `Decompressor` writes through a caller-supplied ring buffer and `flip`/`Flip`
+  hook.
 
 ## Compatibility with ZX1
 
@@ -23,7 +25,10 @@ changes the format.
 [c/zx1/src](c/zx1/src), compares both compressors, cross-decompresses their
 output, and checks the 68000 decoders on a C-produced stream.
 
-## Usage
+The C# tests port every Java behavior test and pin the compressor to the same
+original-C golden streams, including skipped, backwards, and quick modes.
+
+## Java CLI
 
 ```sh
 mvn package
@@ -56,6 +61,23 @@ while (decompressor.resume()) {
 When the ring fills, the abstract `flip(buffer, length)` method decides where
 its bytes go; the static `decompress` helpers collect them in memory. Instances
 have no global state and can be reset and reused.
+
+## C# port
+
+The C# implementation targets .NET 10 and mirrors the Java API and command-line
+options. From the repository root:
+
+```sh
+dotnet build csharp/Jx1.slnx -c Release
+dotnet run --project csharp/src/Jx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
+dotnet run --project csharp/src/Djx1.Cli -- [-f] [-mN] input.zx1 [output]
+dotnet test csharp/Jx1.slnx -c Release
+```
+
+For in-memory decoding, call `Jx1.Decompressor.Decompress(compressed)`. For
+bounded or resumable output, derive from `Decompressor`, implement `Flip`, and
+call `Resume` until it returns `false`. See [csharp/README.md](csharp/README.md)
+for compression, publishing, and project-layout details.
 
 ## The 68k decompressors
 
@@ -221,6 +243,9 @@ command are in [68k/test/README.md](68k/test/README.md).
 | `Jx1` | the `zx1` tool plus `-mN` and `-lN` |
 | `Djx1` | the `dzx1` tool plus `-mN` |
 
+The Java sources are under `src/`; equivalent .NET library, CLI, and test
+projects are under [`csharp/`](csharp/).
+
 Tagged versions are available from [GitHub Releases](https://github.com/odipar/jx1/releases).
 
 ## License
@@ -228,6 +253,7 @@ Tagged versions are available from [GitHub Releases](https://github.com/odipar/j
 Dual, following the original ZX1 (see [LICENSE](LICENSE)): the compressor is
 BSD 3-Clause; the decompressors may be used freely, including commercially,
 when their documentation says ZX1/jx1 was used. The ZX1 format and algorithm
-are by Einar Saukas. The additions are © 2026 Robbert van Dalen; the jx1 code
-and experiments were written by Claude (Anthropic's Claude Code) under his
-direction.
+are by Einar Saukas. The additions are © 2026 Robbert van Dalen. The Java,
+68000, test, and optimization work was written by Claude (Anthropic's Claude
+Code); the C# port was written by OpenAI Codex. Both were developed under
+Robbert's direction.
