@@ -1,10 +1,11 @@
-jx1 / nx1 / ST1 License
-=======================
+ST1 License
+===========
 
-jx1 contains the Java jx1 and C# nx1 ports of the ZX1 data compression format
-and algorithm, with the ST1 resumable 68000 decompressors and related
-experiments. It follows the dual licensing structure of the original ZX1 (see
-c/zx1/LICENSE and the License section of c/zx1/README.md):
+ST1 is an Atari ST decompression project for the ZX1 data compression format.
+It contains the ST1 resumable 68000 decompressors, the supporting Java jx1 and
+C# nx1 tools and reference implementations, and related experiments. It
+follows the dual licensing structure of the original ZX1 (see c/zx1/LICENSE
+and the License section of c/zx1/README.md):
 
 1. THE COMPRESSOR - the Java and C# compressors and optimal parsers (Block,
    Optimizer, Compressor, Java Jx1, C# Nx1, and the retired compressor
@@ -19,7 +20,7 @@ c/zx1/LICENSE and the License section of c/zx1/README.md):
    variants in retired/68k/ (including jx1_68000_ring_mod.S) - can be used
    freely within your own programs (for any platform), even for commercial
    releases. The only condition is that you must indicate somehow in your
-   documentation that you have used ZX1, via jx1, nx1, or ST1.
+   documentation that you have used ZX1, via ST1, jx1, or nx1.
 
 Attribution
 -----------
@@ -41,7 +42,7 @@ BSD 3-Clause License (the compressor)
 -------------------------------------
 
 Copyright (c) 2021, Einar Saukas (original ZX1)
-Copyright (c) 2026, Robbert van Dalen (jx1/nx1/ST1 additions)
+Copyright (c) 2026, Robbert van Dalen (ST1 project additions)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

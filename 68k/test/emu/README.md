@@ -3,8 +3,8 @@
 The differential suite behind every correctness claim about the ST1
 decompressors. Each script assembles the decoder with rmac, runs it under
 [Unicorn](https://www.unicorn-engine.org/) as a plain 68000, and checks the
-output byte-for-byte against the project's own Java compressor — so the
-reference is the implementation the format is defined by, not a fixture.
+output byte-for-byte against the supporting Java jx1 workbench — an executable
+reference for the ST1 translation rather than a frozen fixture.
 
 ```sh
 mvn compile                                   # the compressor makes the streams

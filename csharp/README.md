@@ -1,8 +1,8 @@
 # nx1 for C#
 
-`nx1` is the .NET 10 port of Java `jx1`. It matches the Java compressor's ZX1
-output and provides the same resumable ring-buffer decompression model and
-CLI options.
+`nx1` is the .NET 10 workbench for the ST1 project and a port of Java `jx1`.
+It builds ST1-compatible ZX1 assets and independently mirrors the readable
+compressor and resumable-decoder model used to verify the 68000 code.
 
 ## Build and test
 
@@ -24,7 +24,8 @@ dotnet run --project csharp/src/Nx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [out
 dotnet run --project csharp/src/Dnx1.Cli -- [-f] [-mN] input.zx1 [output]
 ```
 
-The arguments have the same meaning as the [Java tools](../README.md#java-cli).
+The arguments have the same meaning as the
+[Java tools](../README.md#jx1-java-tooling).
 To produce app-host executables named `nx1` and `dnx1`:
 
 ```sh
@@ -63,8 +64,8 @@ exceptions.
 ## Origin and attribution
 
 The ZX1 format and original C implementation were designed and implemented by
-Einar Saukas (Copyright © 2021), with thanks to introspec/spke. The jx1
-extensions are Copyright © 2026 Robbert van Dalen. The Java implementation was
+Einar Saukas (Copyright © 2021), with thanks to introspec/spke. The ST1 project
+additions are Copyright © 2026 Robbert van Dalen. The Java implementation was
 written by Claude (Anthropic's Claude Code), and this C# nx1 port by OpenAI
 Codex, both under Robbert's direction. The port uses the repository's
-[ZX1/jx1 dual license](../LICENSE).
+[ST1/ZX1 dual license](../LICENSE).
