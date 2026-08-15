@@ -146,13 +146,13 @@ verify_ring:
 .loop:
         move.l  #$BEEF0000,d5                   ; d5/d6/a4 are what is still
         move.l  d5,d6                           ; clobbered - the parse state is
-        movea.l d5,a4                           ; in a0/a1/d0-d3 between calls
+        movea.l d5,a4                           ; in a0/a1/d0/d1/d3 between calls
         move.w  d7,d4                           ; and d4 is this call's budget
-        bsr     jx1_resume                      ; a1 = write pointer, d0 = 0/1
-        movem.l d0-d3/a0,(a5)                   ; the parse state is in registers
+        bsr     jx1_resume                      ; a1 = write pointer, d1 = result
+        movem.l d0-d1/d3/a0,(a5)                ; the parse state is in registers
                                                 ; now, and the draining below
                                                 ; clobbers a0 for its compare
-        move.w  d5,retcode
+        move.w  d1,retcode
         move.l  a1,curdst
 
         move.l  a1,d0
@@ -181,7 +181,7 @@ verify_ring:
         movea.l a2,a1                           ; ring_mod does not wrap for us
     .endif
 .more:
-        movem.l (a5),d0-d3/a0                   ; hand the state back for the
+        movem.l (a5),d0-d1/d3/a0                ; hand the state back for the
         tst.w   retcode                         ; next call (in memory, not on
         bne     .loop                           ; the stack: .bad leaves early)
 
@@ -202,7 +202,7 @@ verify_ring:
 
 ; -----------------------------------------------------------------------------
 ; check_size: d0 = bytes produced by the call just made. Checks the documented
-; per-call contract on hardware: a call that returns 1 produces exactly the
+; per-call contract on hardware: a call leaving d1 nonzero produces exactly the
 ; chunk size, unless it ran into the end of the buffer - which can only happen
 ; when the chunk does not divide the buffer. Sets sizebad if that is violated
 ; and counts the short calls. Preserves d0 (and the flags it sets on it).
@@ -282,7 +282,7 @@ time_ring:
         movea.l a2,a1                           ; has; here it is explicit
 .nowrap:
     .endif
-        tst.w   d5
+        tst.w   d1
         bne.s   .drain
         subq.l  #1,iters
         bne.s   .loop
@@ -335,8 +335,8 @@ m_t:        dc.b    "T ",0
         even
 save_ssp:   ds.l    1
 iters:      ds.l    1
-state:      ds.l    5                           ; d0-d3/a0 across a drain
-ringsz:     ds.l    1                           ; was d6, which is state now
+state:      ds.l    4                           ; d0/d1/d3/a0 across a drain
+ringsz:     ds.l    1                           ; ring size retained by the harness
 prev:       ds.l    1
 curdst:     ds.l    1
 expptr:     ds.l    1

@@ -17,7 +17,7 @@ python3 68k/test/emu/boundaries.py            # exact operation-length limits
 python3 68k/test/emu/align68k.py              # odd-address audit, linear
 python3 68k/test/emu/align_ring2.py jx1_68000_ring.bin pow2   # ...and ring
 python3 68k/test/emu/poison.py                # the ABI's clobbered registers
-python3 68k/test/emu/audit.py                 # 89 doc-vs-code claims
+python3 68k/test/emu/audit.py                 # 113 doc-vs-code claims
 python3 68k/test/emu/compat.py                # jx1 vs the original C zx1
 ```
 
@@ -46,7 +46,7 @@ reports failures there by design.
   a caller may legally pass anything in them; a partial-register bug in both
   ring decoders survived months of testing because every harness politely
   passed clean ones. Then it does the converse: it canaries every register
-  the contract does not call state and checks that a call destroys **exactly**
+  the contract does not call state (including newly freed `d2`) and checks that a call destroys **exactly**
   `d4`, `d5`, `d6` and `a4`. The two ring suites poison as a matter of course
   now.
 * **`align68k.py` / `align_ring2.py`** hook every memory access and reject a
@@ -62,7 +62,7 @@ reports failures there by design.
   from it means anything.
 * **`test_ring*.py`** additionally require that nothing is ever written
   outside the ring, that the write pointer never wraps inside a call, that
-  `a3`/`a4`/`d6`/`d7` come back untouched, that a finished stream stays
+  `a2`/`a3`/`d2`/`d7`/`a6` come back untouched, that a finished stream stays
   finished, and — for `ring_mod` — that every call but the last emits
   exactly one chunk. They drive the interface the way the documentation
   describes it: `a1` in and out, wrapped by the caller when it reaches the

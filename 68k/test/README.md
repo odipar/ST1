@@ -22,7 +22,7 @@ measure decode time with the system's 200 Hz tick:
   [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) with the dividing shapes
   its contract requires. Nothing is accumulated: each call's output is
   compared against the expected image as it is drained, and the wrap is
-  detected the way the interface intends (`a1 == a4`). The point of the
+  detected the way the interface intends (`a1 == a3`). The point of the
   feature is visible here — 32000 bytes decompressed through a 256-byte
   buffer.
 
@@ -66,7 +66,7 @@ which is exactly the ratio cost of a small ring.
 
 Both harnesses fill **the clobbered registers with junk before every
 `jx1_resume`** — `d5`, `d6` and `a4`, which is all a caller may scribble on
-now that the parse state lives in `a0`/`a1` and `d0`–`d3` between calls.
+now that the parse state lives in `a0`/`a1` and `d0`/`d1`/`d3` between calls.
 The ABI promises nothing about their incoming values, so this is what a legal
 caller may look like, and a decoder that reads their upper words is broken.
 That check is what a partial-register bug in both ring decoders escaped for
@@ -103,9 +103,9 @@ runs only dividing shapes — 256/16, 256/64, 1000/125, 1016/127, 1024/16,
 `OKf`. It does, which is the fixed-size-output property confirmed on
 hardware.
 
-Each call that returns 1 must produce exactly the chunk size — unless it ran
+Each call that leaves `d1.w` nonzero must produce exactly the chunk size — unless it ran
 into the end of the buffer, which the harness requires to coincide with the
-write pointer reaching `a4`, and which it rejects outright when the chunk
+write pointer reaching `a3`, and which it rejects outright when the chunk
 divides the ring. The result is reported per shape: **`OKf`** when every call
 was a full chunk, **`OKv`** when short calls appeared at the wrap.
 
@@ -131,62 +131,62 @@ size X.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
-| text | 28 | 360 | 16 | 12450 | 13200 | +6.0% |
-| text | 28 | 360 | 127 | 7818 | 8300 | +6.2% |
-| wordsoup | 818 | 2925 | 16 | 195786 | 206667 | +5.6% |
-| wordsoup | 818 | 2925 | 127 | 162228 | 172000 | +6.0% |
-| farmatch | 212 | 2900 | 16 | 82240 | 85333 | +3.8% |
-| farmatch | 212 | 2900 | 127 | 45270 | 46667 | +3.1% |
-| period129 | 138 | 1032 | 16 | 30376 | 31600 | +4.0% |
-| period129 | 138 | 1032 | 127 | 17390 | 18200 | +4.7% |
-| allsame | 6 | 1000 | 16 | 28674 | 29800 | +3.9% |
-| allsame | 6 | 1000 | 127 | 15854 | 16600 | +4.7% |
-| rle32k | 7 | 32000 | 16 | 888972 | 920000 | +3.5% |
-| rle32k | 7 | 32000 | 127 | 481246 | 500000 | +3.9% |
-| maxoffset | 32589 | 33012 | 16 | 927632 | 960000 | +3.5% |
-| maxoffset | 32589 | 33012 | 127 | 521588 | 540000 | +3.5% |
+| text | 28 | 360 | 16 | 12360 | 13100 | +6.0% |
+| text | 28 | 360 | 127 | 7808 | 8300 | +6.3% |
+| wordsoup | 818 | 2925 | 16 | 195056 | 205333 | +5.3% |
+| wordsoup | 818 | 2925 | 127 | 162134 | 172000 | +6.1% |
+| farmatch | 212 | 2900 | 16 | 81514 | 84667 | +3.9% |
+| farmatch | 212 | 2900 | 127 | 45180 | 46667 | +3.3% |
+| period129 | 138 | 1032 | 16 | 30118 | 31400 | +4.3% |
+| period129 | 138 | 1032 | 127 | 17356 | 18200 | +4.9% |
+| allsame | 6 | 1000 | 16 | 28424 | 29600 | +4.1% |
+| allsame | 6 | 1000 | 127 | 15824 | 16400 | +3.6% |
+| rle32k | 7 | 32000 | 16 | 880974 | 913333 | +3.7% |
+| rle32k | 7 | 32000 | 127 | 480240 | 493333 | +2.7% |
+| maxoffset | 32589 | 33012 | 16 | 919378 | 953333 | +3.7% |
+| maxoffset | 32589 | 33012 | 127 | 520550 | 540000 | +3.7% |
 
 The ring decompressor, measured the same way through a 1024-byte ring at
 chunk 16 — every corpus except `text`, `allsame` and `period129` being
 several times the buffer it streams through — lands in the same band,
-**+3.5% to +6.3%** over its model (mean +4.5%):
+**+3.7% to +6.0%** over its model (mean +4.5%):
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 14320 | 15100 | +5.4% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 242176 | 257333 | +6.3% |
-| farmatch | 410 | 2900 | 1024 | 16 | 95022 | 98667 | +3.8% |
-| period129 | 138 | 1032 | 1024 | 16 | 35002 | 36600 | +4.6% |
-| allsame | 6 | 1000 | 1024 | 16 | 33370 | 34800 | +4.3% |
-| rle32k | 7 | 32000 | 1024 | 16 | 1043516 | 1080000 | +3.5% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 1034172 | 1073333 | +3.8% |
+| text | 28 | 360 | 1024 | 16 | 14230 | 15000 | +5.4% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 241446 | 256000 | +6.0% |
+| farmatch | 410 | 2900 | 1024 | 16 | 94296 | 98000 | +3.9% |
+| period129 | 138 | 1032 | 1024 | 16 | 34744 | 36200 | +4.2% |
+| allsame | 6 | 1000 | 1024 | 16 | 33120 | 34600 | +4.5% |
+| rle32k | 7 | 32000 | 1024 | 16 | 1035518 | 1073333 | +3.7% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 1025918 | 1066667 | +4.0% |
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
 spends that on a cheaper entry, on the same shape. Its model column includes
-**the caller's wrap** (`cmpa.l a4,a1 / bne.s / movea.l a3,a1`), since that
+**the caller's wrap** (`cmpa.l a3,a1 / bne.s / movea.l a2,a1`), since that
 decoder does not wrap for you and the timed loop therefore executes it:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
-| text | 28 | 360 | 1024 | 16 | 13814 | 14500 | +5.0% |
-| wordsoup | 1203 | 2925 | 1024 | 16 | 238162 | 253333 | +6.4% |
-| farmatch | 410 | 2900 | 1024 | 16 | 91030 | 94000 | +3.3% |
-| period129 | 138 | 1032 | 1024 | 16 | 33578 | 35000 | +4.2% |
-| allsame | 6 | 1000 | 1024 | 16 | 31984 | 33200 | +3.8% |
-| rle32k | 7 | 32000 | 1024 | 16 | 999702 | 1033333 | +3.4% |
-| maxoffset | 33121 | 33012 | 1024 | 16 | 988956 | 1020000 | +3.1% |
+| text | 28 | 360 | 1024 | 16 | 13724 | 14500 | +5.7% |
+| wordsoup | 1203 | 2925 | 1024 | 16 | 237432 | 252000 | +6.1% |
+| farmatch | 410 | 2900 | 1024 | 16 | 90304 | 93333 | +3.4% |
+| period129 | 138 | 1032 | 1024 | 16 | 33320 | 34600 | +3.8% |
+| allsame | 6 | 1000 | 1024 | 16 | 31734 | 33000 | +4.0% |
+| rle32k | 7 | 32000 | 1024 | 16 | 991704 | 1026667 | +3.5% |
+| maxoffset | 33121 | 33012 | 1024 | 16 | 980702 | 1013333 | +3.3% |
 
-Same band (+3.1% to +6.4%, mean +4.2%). Side by side, in raw ticks:
+Same band (+3.3% to +6.1%, mean +4.3%). Side by side, in raw ticks:
 
 | corpus | ring | ring_mod | ring_mod gain |
 |---|---|---|---|
-| text | 151 | 145 | +4.0% |
-| wordsoup | 193 | 190 | +1.6% |
-| farmatch | 148 | 141 | +4.7% |
-| period129 | 183 | 175 | +4.4% |
-| allsame | 174 | 166 | +4.6% |
-| rle32k | 162 | 155 | +4.3% |
-| maxoffset | 161 | 153 | +5.0% |
+| text | 150 | 145 | +3.3% |
+| wordsoup | 192 | 189 | +1.6% |
+| farmatch | 147 | 140 | +4.8% |
+| period129 | 181 | 173 | +4.4% |
+| allsame | 173 | 165 | +4.6% |
+| rle32k | 161 | 154 | +4.3% |
+| maxoffset | 160 | 152 | +5.0% |
 
 (ticks, ring 1024, chunk 16, same corpora and calibration.) Both files carry
 the same entry optimisations, so the last column is the divisibility
@@ -237,8 +237,8 @@ reverse, both reduced to nothing.
 Then the last packed field was unpacked. `d3` had carried lastOffset in its
 high word, which cost a `swap` pair on every match segment — **0.11 to 0.40
 swaps per output byte** across the corpora, and none at all on `maxoffset`,
-which is nearly all literals. Giving lastOffset its own register (`d6`, which
-nothing else wanted) removed them:
+which is nearly all literals. Splitting that packed long into remaining in
+`d1.w` and lastOffset in `d3.w` removed them:
 
 | | before | after | gain |
 |---|---|---|---|
@@ -254,7 +254,22 @@ rather than 127, the same two bytes, worth **+4.2% to +16.3%** (mean +12.4%)
 under the model. The resumable entry is unchanged, so the timed rows above do
 not show it.
 
-**The model holds.** Real ST decode time runs **+3.1% to +6.4%** above the
+Finally, the last offset absorbed the operation state without absorbing the
+remaining count: negative `d3.w` means LITERALS and positive means MATCH;
+`d1.w = 0` together with `d3.w = +1/0` means START/DONE. That frees `d2`
+without adding instructions to the hot paths. Once DONE was normalized to
+`d1.w = 0`, the separate 0/1 result in `d5` was redundant too; testing `d1`
+removes one `moveq` from every non-final call. The result is 6 bytes off every
+decoder, exactly 4 cycles off each suspension, and 2 cycles off DONE:
+
+| | before | after | gain |
+|---|---|---|---|
+| linear, X=16 | 132/155/128/158/149/138/144 | 131/154/127/157/148/137/143 | +0.6% to +0.8% |
+| linear, X=127 | 83/129/70/91/83/75/81 | 83/129/70/91/82/74/81 | +0.0% to +1.3% |
+| ring 1024/16 | 151/193/148/183/174/162/161 | 150/192/147/181/173/161/160 | +0.5% to +1.1% |
+| ring_mod 1024/16 | 145/190/141/175/166/155/153 | 145/189/140/173/165/154/152 | +0.0% to +1.1% |
+
+**The model holds.** Real ST decode time runs **+2.7% to +6.3%** above the
 idealized 68000 cycle counts (mean +4.4%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
 reference `dbf` loop, whose cycle count is exact by construction, measures

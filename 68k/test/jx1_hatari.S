@@ -167,13 +167,13 @@ run_resume:
 .loop:
         move.w  d7,d4                           ; the budget is a parameter now
         bsr     jx1_resume
-        tst.w   d5
+        tst.w   d1
         bne.s   .loop
         rts
 
 ; run_resume_poison: the same, but fills the caller-clobbered registers with
 ; junk before every call. d5/d6/a4 are what the ABI still calls clobbered -
-; the parse state lives in a0/a1/d0/d1/d2/d3 between calls now, and d4 is
+; the parse state lives in a0/a1/d0/d1/d3 between calls now, and d4 is
 ; the budget - so this is what a legal caller may look like.
 run_resume_poison:
         bsr     resume_setup
@@ -183,7 +183,7 @@ run_resume_poison:
         movea.l d5,a4
         move.w  d7,d4
         bsr     jx1_resume
-        tst.w   d5
+        tst.w   d1
         bne.s   .loop
         rts
 
