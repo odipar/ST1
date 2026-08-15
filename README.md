@@ -194,3 +194,5 @@ The ZX1 format and algorithm are by Einar Saukas. The additions are © 2026
 Robbert van Dalen. Claude (Anthropic's Claude Code) wrote the Java, ST1/68000,
 tests, and optimization work. OpenAI Codex wrote the C# nx1 port. Both were
 developed under Robbert's direction.
+
+Special thanks to Sandor Drieënhuizen for his support, proofreading, and ideas.
