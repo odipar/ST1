@@ -368,6 +368,17 @@ scripts = sorted(f.name for f in (K68 / 'test' / 'emu').glob('*.py'))
 missing = [f for f in scripts if f not in emu_readme]
 check(not missing, f'every emulator script is listed in its README (missing {missing})')
 
+# Timing data is generated from the current decoder/compressor/harness inputs.
+# This cheap audit path does not invoke Unicorn or Hatari: it verifies the
+# recorded content fingerprint and both exact generated README blocks.  The
+# full cycle trace remains available as cycle_model.py --check.
+timing_audit = subprocess.run(
+    [sys.executable, str(K68 / 'test' / 'emu' / 'cycle_model.py'), '--audit'],
+    capture_output=True, text=True)
+check(timing_audit.returncode == 0,
+      'cycle/tick tables match current inputs and generated docs'
+      + (f' ({timing_audit.stdout.strip()})' if timing_audit.stdout.strip() else ''))
+
 # 15. the trusted-input boundary is stated where a caller will see it
 for f in FILES:
     check('TRUSTED INPUT ONLY' in (K68 / f).read_text(), f'{f}: states trusted-input-only')

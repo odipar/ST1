@@ -1,0 +1,207 @@
+{
+  "fingerprint": "3af6e75d2d3e19bd5602b66e9f653c06f2a33c103194da82ac58f1468a4fcda6",
+  "hatari": {
+    "calibration": {
+      "linear": {
+        "outer": 12,
+        "ticks": 241
+      },
+      "ring": {
+        "outer": 12,
+        "ticks": 240
+      },
+      "ring_mod_1024": {
+        "outer": 12,
+        "ticks": 242
+      },
+      "ring_mod_256": {
+        "outer": 12,
+        "ticks": 242
+      }
+    },
+    "iterations": {
+      "allsame": 200,
+      "farmatch": 60,
+      "maxoffset": 6,
+      "period129": 200,
+      "rle32k": 6,
+      "text": 400,
+      "wordsoup": 30
+    },
+    "ticks": {
+      "linear": {
+        "127": {
+          "allsame": 81,
+          "farmatch": 69,
+          "maxoffset": 80,
+          "period129": 89,
+          "rle32k": 74,
+          "text": 78,
+          "wordsoup": 113
+        },
+        "16": {
+          "allsame": 143,
+          "farmatch": 123,
+          "maxoffset": 139,
+          "period129": 152,
+          "rle32k": 133,
+          "text": 124,
+          "wordsoup": 137
+        }
+      },
+      "ring": {
+        "1024/16": {
+          "allsame": 170,
+          "farmatch": 144,
+          "maxoffset": 155,
+          "period129": 178,
+          "rle32k": 159,
+          "text": 144,
+          "wordsoup": 171
+        }
+      },
+      "ring_mod": {
+        "1024/16": {
+          "allsame": 163,
+          "farmatch": 139,
+          "maxoffset": 152,
+          "period129": 171,
+          "rle32k": 153,
+          "text": 140,
+          "wordsoup": 166
+        },
+        "256/16": {
+          "allsame": 167,
+          "farmatch": 142,
+          "maxoffset": 152,
+          "period129": 178,
+          "rle32k": 156,
+          "text": 143,
+          "wordsoup": 170
+        }
+      }
+    }
+  },
+  "inputs": {
+    "68k/jx1_68000.S": "ee62d8fbdea14a8cdb40380b1ef732ad7ddd025c36b283ba236b375a12ebb5c2",
+    "68k/jx1_68000_ring.S": "5e8f46908ed8bfb6c16769169744242d08ce2abc3ee87fa31ce9f3082269dbff",
+    "68k/jx1_68000_ring_mod.S": "42bd4831860599e5c81debd34e5eff79f58c8fbb5184497a6a5f08207ec35800",
+    "68k/test/emu/cycle_model.py": "13ce2d6add58e5c9337b9654da5aae2a98f4783cf194cad313e45a0d168653a8",
+    "68k/test/gendata.py": "e28565f3c7123dc409fa99036b7a55fd9ec30b44def6e9ef66ff8499f3d12550",
+    "68k/test/hatari_util.inc": "5a6ee71964e2e741f691b5c6b52d8badebac79399c6e357d485fb05de64cf405",
+    "68k/test/jx1_hatari.S": "2562f31a37d154137d8dc78a2fc3b1c1f857139cbc7298489c089cea92337aaf",
+    "68k/test/jx1_hatari_ring.S": "6b94d5a17037466f6479804cb88a449c74edf3d4fdc04adde3ebd1af5477af5a",
+    "68k/test/run.sh": "9a669e64c2faaba4c7c3090cdb63205f75257198b008a8fb4303be0d5c0a4704",
+    "pom.xml": "7cc4885331b2329b5f599b43391496f3464c1b8e177f1534ad0bcd86b04f475a",
+    "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
+    "src/main/java/org/jx1/Cli.java": "024bf122102d3b7f65c73f71668584d4145ae390d6ea69a10c1513ed4b3b6e7d",
+    "src/main/java/org/jx1/Compressor.java": "586366b3ce7aa6e3b61bf784259e813d1f04691bf0547bd3365cd445f32868c5",
+    "src/main/java/org/jx1/Decompressor.java": "1c5984f4a968f837d69a215edb6be372ba2d95d2d3d383ec2eca8f7c9797649f",
+    "src/main/java/org/jx1/Djx1.java": "eddb6c0e379a73e843cf84b7982da4c8af2600971c7afa5e65c3ea4d76dc5f24",
+    "src/main/java/org/jx1/Jx1.java": "50af454ecc6899b80cdc57332ab5f5c58e00751639690dd1d93707e097ff16ff",
+    "src/main/java/org/jx1/Optimizer.java": "77503c26d694b8f6f45ba818bef76383635df8e19899331cae1800a152145031"
+  },
+  "model": {
+    "binaries": {
+      "linear": {
+        "bytes": 192,
+        "sha256": "c83d7646629e02ff088bb8cd3a7681feb0ddce2b30b7090c23b1661a4dab3e1a"
+      },
+      "ring": {
+        "bytes": 240,
+        "sha256": "918476049cf6cbcc581b09e55747155973f7a6ee0d1c9dc7079b8853a1847fd9"
+      },
+      "ring_mod_1024": {
+        "bytes": 200,
+        "sha256": "4a7443ea172915302e58060c781bff6ce52fb48ec5d41ffee769a3239a4ad2b6"
+      },
+      "ring_mod_256": {
+        "bytes": 200,
+        "sha256": "a7bb91307f2b3f6367b6130688182d89072df7278fdc00bd0f71ee053da4b099"
+      }
+    },
+    "cycles": {
+      "linear": {
+        "127": {
+          "allsame": 15656,
+          "farmatch": 44604,
+          "maxoffset": 511234,
+          "period129": 17042,
+          "rle32k": 474704,
+          "text": 7464,
+          "wordsoup": 142066
+        },
+        "16": {
+          "allsame": 27046,
+          "farmatch": 77440,
+          "maxoffset": 870390,
+          "period129": 28572,
+          "rle32k": 836982,
+          "text": 11576,
+          "wordsoup": 171626
+        }
+      },
+      "ring": {
+        "1024/16": {
+          "allsame": 31930,
+          "farmatch": 90550,
+          "maxoffset": 964728,
+          "period129": 33376,
+          "rle32k": 996392,
+          "text": 13524,
+          "wordsoup": 212670
+        }
+      },
+      "ring_mod": {
+        "1024/16": {
+          "allsame": 30922,
+          "farmatch": 87890,
+          "maxoffset": 955418,
+          "period129": 32398,
+          "rle32k": 963648,
+          "text": 13132,
+          "wordsoup": 206186
+        },
+        "256/16": {
+          "allsame": 31558,
+          "farmatch": 89604,
+          "maxoffset": 957866,
+          "period129": 33610,
+          "rle32k": 983382,
+          "text": 13392,
+          "wordsoup": 210430
+        }
+      }
+    },
+    "streams": {
+      "linear": {
+        "allsame": 6,
+        "farmatch": 212,
+        "maxoffset": 32589,
+        "period129": 138,
+        "rle32k": 7,
+        "text": 28,
+        "wordsoup": 818
+      },
+      "output": {
+        "allsame": 1000,
+        "farmatch": 2900,
+        "maxoffset": 33012,
+        "period129": 1032,
+        "rle32k": 32000,
+        "text": 360,
+        "wordsoup": 2925
+      },
+      "ring": {
+        "allsame": 6,
+        "farmatch": 410,
+        "maxoffset": 33121,
+        "period129": 138,
+        "rle32k": 7,
+        "text": 28,
+        "wordsoup": 1203
+      }
+    }
+  },
+  "schema": 1
+}
