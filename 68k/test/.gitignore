@@ -1,5 +1,7 @@
 *.PRG
 *.z
 *.r
+*.r1024
 *.e
 data.inc
+__pycache__/

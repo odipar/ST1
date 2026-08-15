@@ -96,7 +96,15 @@ start:
         bsr     putdec
         bsr     crlf
 
-        lea     ring_cases,a6
+    .if RINGMOD
+        .if RING_SIZE = RING_SMALL
+        lea     ring_cases,a6                  ; N=256 requires -m256
+        .else
+        lea     fair_cases,a6                  ; fair N=1024 comparison
+        .endif
+    .else
+        lea     fair_cases,a6                  ; general timing uses N=1024
+    .endif
 .tcase:
         tst.l   CASE_NAME(a6)
         beq     .done
@@ -106,6 +114,17 @@ start:
         move.l  #RING_BIG,ringsz
     .endif
         moveq   #16,d7
+    .if RINGMOD
+        .if RING_SIZE <> RING_SMALL
+        bsr     verify_ring                    ; verify the exact timed stream
+        bsr     crlf
+        moveq   #16,d7
+        .endif
+    .else
+        bsr     verify_ring                    ; verify the exact timed stream
+        bsr     crlf
+        moveq   #16,d7
+    .endif
         bsr     time_ring
         lea     CASE_SIZE(a6),a6
         bra     .tcase
