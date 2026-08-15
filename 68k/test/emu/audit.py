@@ -42,27 +42,31 @@ for f in FILES:
               else ['jx1_init', 'jx1_resume'])
     check(slots == expect, f'{f}: jump table {slots} vs documented {expect}')
 
-# 4. the budget is a per-call parameter in d5.w, not a field and not state
+# 4. the budget is a per-call parameter in d4.w, not a field and not state
 for f in FILES:
     src = (K68 / f).read_text()
     check('d0.w = chunk size' not in src, f'{f}: init no longer takes a chunk')
-    check("d4.w = this call's budget" in src, f'{f}: resume documents the budget in d5.w')
+    check("d4.w = this call's budget" in src, f'{f}: resume documents the budget in d4.w')
     check('the budget in d4.w is 1..65535' in src, f'{f}: the budget range is stated')
 
 # 5. the state encoding the entry dispatch relies on
 for f in FILES:
     src = (K68 / f).read_text()
-    # init writes nothing: it just seeds the three registers that are not
-    # pointers, and $80 serves as both the empty bit queue and State.START
+    # init writes nothing: it seeds the three registers that are not pointers.
+    # The sign of lastOffset is the active-op state; d1/d3 encode START/DONE.
     check('moveq   #-128,d0' in src, f'{f}: init seeds the bit queue with $80')
-    check('move.b  d0,d2' in src, f'{f}: init seeds State.START from the same $80')
-    check('bmi.s   entry_special' in src, f'{f}: entry dispatches on the sign')
-    check('moveq   #0,d2' in src, f'{f}: LITERALS = 0')
-    check('st      d2' in src, f'{f}: DONE stored with st, in the state register')
-    # d3.w is already zero when new_offset is reached, so clearing it there
-    # would be dead. jx1_init's own moveq #0,d3 is the real initialisation.
-    body = src[src.index('new_offset:'):]
-    check('moveq   #0,d1' not in body, f'{f}: no dead clear before new_offset')
+    check('moveq   #1,d3' in src, f'{f}: init encodes START with lastOffset = +1')
+    check('tst.w   d1' in src and 'beq.s   entry_special' in src,
+          f'{f}: zero remaining dispatches START/DONE')
+    check(src.count('neg.w   d3') == 2,
+          f'{f}: lastOffset sign flips exactly at both LITERALS/MATCH transitions')
+    check('tst.w   d3' in src, f'{f}: active-op dispatch tests signed lastOffset')
+    end = src[src.index('end_marker:'):]
+    check('clr.w   d1' in end and 'clr.w   d3' in end,
+          f'{f}: DONE normalizes remaining and lastOffset for repeat polling')
+    offset_head = src[src.index('new_offset:'):src.index('two_byte:')]
+    check('moveq   #0,d1' not in offset_head and 'clr.w   d1' not in offset_head,
+          f'{f}: no dead clear before new_offset')
     check('addx.w  d1,d1' in src, f'{f}: two-byte offset folds the carry')
 
 # 6. no stale ctx_alloc, no stale 15-byte wording anywhere current
@@ -105,7 +109,7 @@ check(not re.search(r'\b(32[0-9]|33[0-9])\b', runsh), 'run.sh quotes no stale by
 # 9. both harnesses poison the clobbered registers
 for f in ('test/jx1_hatari.S', 'test/jx1_hatari_ring.S'):
     src = (K68 / f).read_text()
-    check('$BEEF0000' in src, f'{f}: poisons d0-d5 before resume')
+    check('$BEEF0000' in src, f'{f}: poisons the clobbered registers before resume')
 
 # 10. LICENSE names every shipped decompressor
 for f in FILES:
@@ -138,8 +142,9 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    check('tst.b   d2' in body, f'{f}: the entry dispatches on the state register')
-    check('d2.b  operation state' in src, f'{f}: the header maps the state register')
+    check(not re.search(r'^\s+[^;\n]*\bd2\b', body, re.M),
+          f'{f}: d2 is not touched by the decoder')
+    check('d3.w  signed last offset' in src, f'{f}: the header maps the folded state')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
@@ -155,7 +160,7 @@ check('| **clobbered** | **`d4.w` `d5.l` `d6.l` `a4.l`** |' in readme,
 # to use the registers the decoders actually use.
 for block in re.findall(r'```\n(        lea     stream.*?)```', readme, re.S):
     check('bsr     jx1_resume' in block, 'README example calls jx1_resume')
-    check('tst.w   d5' in block, 'README example tests the return code in d5')
+    check('tst.w   d1' in block, 'README example tests remaining/result in d1')
     check(re.search(r'moveq   #\d+,d4', block), 'README example passes the budget in d4')
     check('tst.w   d0' not in block, 'README example does not test the old return register')
 

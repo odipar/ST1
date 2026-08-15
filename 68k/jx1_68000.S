@@ -18,44 +18,41 @@
 ; match window and must hold everything decompressed so far. Use
 ; jx1_68000_ring.S to decompress into memory bounded by a ring buffer instead.
 ;
-; 238 bytes, position-independent, one body: no macros, no tables, no
+; 232 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. There is no context block to allocate, align or
-; keep alive; jx1_init seeds four registers and a resume loop leaves all six
+; keep alive; jx1_init seeds three registers and a resume loop leaves all five
 ; alone between calls:
 ;
 ;   a0.l  input position
 ;   a1.l  write pointer - where the output ends, after every call
 ;   d0.b  bit queue ($80 is the empty sentinel)
 ;   d1.w  bytes remaining in the current operation
-;   d2.b  operation state: $80 START, 0 LITERALS, 2 MATCH, $FF DONE. Signed
-;         on purpose, so the entry dispatches on flags a tst.b already sets
-;   d3.w  offset of the current match, and of the last one, which the format
-;         lets a later match reuse
+;   d3.w  signed last offset: negative during LITERALS, positive during MATCH;
+;         with d1 = 0, +1 means START and 0 means DONE
 ;
-; The widths are what the decompressor touches: it never looks above d0's low
-; byte or d1's low word, so what you leave in the rest is your business.
+; The widths are what jx1_resume touches: it never looks above d0's low byte
+; or d1/d3's low words, so after init the rest is your business.
 ;
 ; Calling convention, in full:
 ;
 ;   in and out   a0.l a1.l d0.b      the state; leave it alone between calls
-;                d1.w d2.b d3.w
+;                d1.w d3.w
 ;   in           d4.w                this call's budget, spent by the call
-;   out          d5.l                0 = fully processed, 1 = more to come
 ;   CLOBBERED    d4.w d5.l d6.l      no value in these survives a call
 ;                a4.l
-;   untouched    d7 a2 a3 a5 a6      and the stack beyond the return address
+;   untouched    d2 d7 a2 a3 a5 a6   and the stack beyond the return address
 ;
 ; d5 and d6 are working registers throughout - d5 carries the segment length
-; and the copy-ladder index, d6 the gamma value and the room arithmetic - so
-; treat both as gone across a call; d5 is merely the last thing written to it.
+; and the copy-ladder index, d6 the gamma value - so treat both as gone across
+; a call. d1 itself is the result: zero means done, nonzero means more.
 ; Only d4's low word is spent, but it is spent, not refilled: pass the budget
 ; again on the next call.
 ;
-; A finished stream keeps returning 0 however often you poll it.
+; A finished stream keeps leaving d1.w = 0 however often you poll it.
 ;
 ; -----------------------------------------------------------------------------
 ; ASSUMPTIONS. Undefined behaviour when violated, because nothing checks them:
@@ -82,15 +79,14 @@
                 bra.w   jx1_resume
 
 ; -----------------------------------------------------------------------------
-; jx1_init: a0 = compressed data, a1 = destination. Seeds d0/d1/d2/d3, the
-;           four state registers that are not pointers. Writes no memory.
+; jx1_init: a0 = compressed data, a1 = destination. Seeds d0/d1/d3, the
+;           three state registers that are not pointers. Writes no memory.
 ; Java: the Decompressor constructor / reset().
 ; -----------------------------------------------------------------------------
 jx1_init:
         moveq   #1,d3                   ; lastOffset = INITIAL_OFFSET
         moveq   #0,d1                   ; remaining = 0
         moveq   #-128,d0                ; an empty bit queue: $80 is the sentinel
-        move.b  d0,d2                   ; State.START, which is the same $80
         rts
 
 ; -----------------------------------------------------------------------------
@@ -105,30 +101,29 @@ jx1_decompress:
                                         ; no reason to hand control back, so a
                                         ; 32K output is one call, not 252
         bsr.s   jx1_resume              ; Java: while (resume()) {}
-        tst.w   d5
+        tst.w   d1
         bne.s   .drain
         rts
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a0/a1/d0/d1/d2/d3 = the state, d4.w = this call's budget.
-; Emits at most d4 bytes. Returns d5 = 0 when the stream is fully processed,
-; 1 when there is more. The state registers come back updated, which is
+; jx1_resume: a0/a1/d0/d1/d3 = the state, d4.w = this call's budget.
+; Emits at most d4 bytes. Returns d1.w = 0 when the stream is fully processed,
+; nonzero when there is more. The state registers come back updated, which is
 ; exactly what the next call takes in, and a1 is the end of the output.
 ; Java: Decompressor.resume().
 ;
 ; The two rare states are handled just above the entry so that the branch to
 ; them is a short one; jx1_resume itself is the label below them.
 ; -----------------------------------------------------------------------------
-entry_special:                          ; the negative states, both rare
-        add.b   d2,d2                   ; START ($80) doubles to zero; DONE
-        beq.s   begin_literals          ; ($FF) does not, so it falls through
+entry_special:                          ; d1 = 0: only START or DONE survives a call
+        tst.w   d3                      ; START has the initial +1 offset; DONE is 0
+        bne.s   begin_literals
 entry_done:
-        moveq   #0,d5                   ; keep returning "fully processed"
-        rts
+        rts                             ; d1 = 0: keep returning "fully processed"
 
 jx1_resume:
-        tst.b   d2                      ; op state (Java: switch in next()) -
-        bmi.s   entry_special           ; START and DONE are the negative ones
+        tst.w   d1                      ; zero only survives a call for START
+        beq.s   entry_special           ; or DONE; an active op has bytes left
         bra.s   op_body                 ; mid-op: the budget is fresh, so the
                                         ; loop guard below the copy can be
                                         ; skipped on the way in
@@ -162,7 +157,7 @@ gamma_refill:                           ; both sites want the same thing of a
         rts                             ; costs nothing over branching back
 
 begin_literals:                         ; Java: beginLiterals()
-        moveq   #0,d2                   ; State.LITERALS
+        neg.w   d3                      ; negative lastOffset = State.LITERALS
         bsr.s   get_gamma
         move.w  d6,d1                   ; remaining = gamma; lastOffset untouched
 
@@ -170,7 +165,7 @@ resume_op:                              ; reached after parsing an op, when the
         tst.w   d4                      ; budget may already be spent; a call
         beq.w   suspend                 ; resuming mid-op enters at op_body
                                         ; instead and skips this
-op_body:                                ; shared for literals and match; d2 = state
+op_body:                                ; shared; sign(d3) = LITERALS/MATCH
         move.w  d1,d5                   ; take_budget: min(remaining, budget),
         cmp.w   d4,d5                   ; subtracted from both (its only site)
         bls.s   budget_fits
@@ -179,8 +174,8 @@ budget_fits:
         sub.w   d5,d1
         sub.w   d5,d4
         movea.l a0,a4                   ; literals copy straight from the input
-        tst.b   d2
-        beq.s   source_ready
+        tst.w   d3
+        bmi.s   source_ready
         movea.l a1,a4                   ; match: destination minus lastOffset
         suba.w  d3,a4                   ; (Java: readBufferByte(); the destination
                                         ; is the window, so no ring arithmetic)
@@ -203,22 +198,21 @@ ladder:
 ladder_end:
         dbf     d6,ladder               ; full 8-move passes for big copies
 copy_done:
-        tst.b   d2
-        bne.s   copied                  ; matches consume no input here;
+        tst.w   d3
+        bpl.s   copied                  ; matches consume no input here;
         movea.l a4,a0                   ; literals do
 copied:
         tst.w   d1
         bne.s   suspend                 ; budget spent mid-op
-        tst.b   d2                      ; state test BEFORE the bit read: it
-        beq.s   literals_transition     ; must not clobber the bit in carry
+        tst.w   d3                      ; state test BEFORE the bit read: it
+        bmi.s   literals_transition     ; must not clobber the bit in carry
         add.b   d0,d0                   ; Java: next(), case MATCH (bare read)
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
         move.b  (a0)+,d1                ; d1.w is already zero: every edge here
-                                        ; has just completed an op, and the
-                                        ; stale high word is overwritten by the
-                                        ; swap/move.w pair at got_offset
+                                        ; has just completed an op. Its upper
+                                        ; word is outside the state and ignored
         lsr.b   #1,d1                   ; carry = low bit selects the two-byte form
         bcs.s   two_byte
         neg.w   d1                      ; offset = 128 - value/2
@@ -246,13 +240,10 @@ got_offset:
                                         ; costs 10 cycles at either width)
 
 literals_transition:
-        moveq   #2,d2                   ; State.MATCH: both successors of a
-                                        ; literal run are matches, and the
-                                        ; assignment has to precede the bare
-                                        ; read below - a moveq between the add
-                                        ; and the bcs would destroy the carry.
-                                        ; (A match reaching new_offset already
-                                        ; holds 2, so that path needs none.)
+        neg.w   d3                      ; positive lastOffset = State.MATCH;
+                                        ; both successors of a literal run are
+                                        ; matches, so flip it before the bare
+                                        ; bit read below
         add.b   d0,d0                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
         bsr.w   get_gamma               ; Java: beginMatchFromLastOffset() (.w: same)
@@ -260,11 +251,11 @@ literals_transition:
         bra.w   resume_op               ; (.w: same, zero cycle cost)
 
 suspend:                                ; Java: resume() returning true
-        moveq   #1,d5                   ; more output pending: call again. The
-        rts                             ; state is already where it lives - in
+        rts                             ; d1 <> 0: more output pending. The state
+                                        ; is already where it lives - in
                                         ; the caller's registers
 
-end_marker:                             ; Java: State.DONE (no final flip needed:
-        st      d2                      ; State.DONE; the end of the output is
-        moveq   #0,d5                   ; in a1, as after any other call
-        rts
+end_marker:                             ; Java: State.DONE; the decoded marker
+        clr.w   d1                      ; remains in d1, so normalize DONE as
+        clr.w   d3                      ; d1/d3 = 0 for repeat polling. Output ends
+        rts                             ; in a1, as after any other call

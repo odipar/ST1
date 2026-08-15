@@ -169,8 +169,8 @@ def run_linear(stream, chunk=None):
             break
         calls += 1
         assert calls < 200000, 'resume loop does not terminate'
-    end = uc.reg_read(UC_M68K_REG_A1)      # not the context: only the state
-    return bytes(uc.mem_read(t.DST, end - t.DST))   # byte is live once DONE
+    end = uc.reg_read(UC_M68K_REG_A1)      # not a context: DONE is encoded in
+    return bytes(uc.mem_read(t.DST, end - t.DST))   # the state registers
 
 
 def run_ring(stream, n, chunk):

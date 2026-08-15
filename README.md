@@ -63,14 +63,14 @@ Two warnings:
 
 Three files, all ported from the Java `Decompressor` state machine, sharing
 the same parser and the same copy engine, and **none of them has a context
-block**: the whole state lives in six caller-held registers. They differ in where
-the output goes and in what the caller has to promise:
+block**: the whole state lives in five caller-held registers. They differ in
+where the output goes and in what the caller has to promise:
 
 | File | Code | Output | Entries |
 |---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 238 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 252 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 234 B | the same ring, when N is a multiple of the budget | `jx1_init`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 232 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 246 B | a caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 228 B | the same ring, when N is a multiple of one fixed budget X | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -80,7 +80,7 @@ budget of output.
 [68k/jx1_68000.S](68k/jx1_68000.S) is the one to reach for unless you need
 bounded memory:
 
-* 238 bytes of position-independent code, and no context block at all
+* 232 bytes of position-independent code, and no context block at all
 * one body — no macros, no tables, no self-modifying code; runs from ROM
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
@@ -122,62 +122,62 @@ resume loop just leaves them alone between calls.
 | `a1.l` | write pointer — where the output ends, after every call |
 | `d0.b` | bit queue |
 | `d1.w` | bytes remaining in the current operation |
-| `d2.b` | operation state |
-| `d3.w` | last offset |
+| `d3.w` | signed last offset: negative in LITERALS, positive in MATCH; with `d1.w = 0`, `+1` is START and `0` is DONE |
 
-The widths are what the decompressor touches — it never looks above `d0`'s low
-byte or `d1`'s low word — so what you leave in the rest is your business.
+The widths are what `jx1_resume` touches — it never looks above `d0`'s low
+byte or `d1`/`d3`'s low words — so after initialization, what you leave in the
+rest is your business.
 
 `jx1_init` takes the stream in `a0` and the destination in `a1`, and seeds the
-other four. Each `jx1_resume` emits at most `d4.w` bytes and returns `d5 = 0`
-once the stream is fully processed. The budget is a **parameter, not state**,
-so pass it every call — which also means a caller may vary it, or hand over a
-whole 65535 at once:
+other three. Each `jx1_resume` emits at most `d4.w` bytes and leaves `d1.w = 0`
+once the stream is fully processed, nonzero while more remains. The budget is
+a **parameter, not state**, so pass it every call. Linear and general-ring
+callers may vary it, or hand over a whole 65535 at once; `ring_mod` is the
+exception and requires the same fixed budget X on every call:
 
 ```
         lea     stream,a0               ; compressed data
         lea     output,a1               ; destination
-        bsr     jx1_init                ; seeds d0-d3; writes no memory
+        bsr     jx1_init                ; seeds d0/d1/d3; writes no memory
 .loop:
         moveq   #16,d4                  ; at most 16 bytes from this call
         bsr     jx1_resume
         ; ... your own work here; a1 = end of output so far ...
-        tst.w   d5
+        tst.w   d1
         bne.s   .loop                   ; Java: while (resume()) { ... }
 ```
 
 The only rule is the obvious one: whatever your own work does, it must
-leave `a0`, `a1` and `d0`–`d3` as it found them, since those *are* the
+leave `a0`, `a1`, `d0`, `d1`, and `d3` as it found them, since those *are* the
 decompressor.
 
 | | registers |
 |---|---|
-| state, in and out | `a0.l` `a1.l` `d0.b` `d1.w` `d2.b` `d3.w` (rings also take `a2.l`/`a3.l`, read-only) |
+| state, in and out | `a0.l` `a1.l` `d0.b` `d1.w` `d3.w` (rings also take `a2.l`/`a3.l`, read-only) |
 | in | `d4.w`, this call's budget — **spent** by the call, so pass it again |
-| out | `d5.l` — 0 done, 1 more |
 | **clobbered** | **`d4.w` `d5.l` `d6.l` `a4.l`** |
-| untouched | `d7` `a5` `a6`, and the stack beyond the return address |
+| untouched | `d2` `d7` `a5` `a6` (plus `a2`/`a3` for the linear decoder), and the stack beyond the return address |
 
-The state sits at the bottom of both register files and the scratch above it,
-which is the whole reason for this arrangement: `a0`/`a1` and `d0`–`d3` are
-what a resume loop must leave alone, `a2`/`a3` are the ring bounds it already
-holds, and everything from `d4`/`a4` upwards is the decompressor's to wreck.
+The state sits in `a0`/`a1` and `d0`/`d1`/`d3`; `d2` is free. The rings add
+read-only `a2`/`a3` bounds, while `d4`/`d5`/`d6`/`a4` are scratch.
+
 `d5` and `d6` are working registers throughout — `d5` carries the segment
 length and the copy-ladder index, `d6` the gamma value — so treat both as
-gone across a call. `d5` is simply the last thing written to it.
+gone across a call. The remaining count already in `d1` doubles as the result.
 
-`d3` holds the last offset alone rather than sharing a register with the
-remaining count: reaching a packed offset costs a `swap` pair on every match
-segment, which is 0.11 to 0.40 swaps per output byte across the benchmark
-corpora.
+`d3` holds the last offset and operation state together: its magnitude is the
+offset, and its sign distinguishes LITERALS from MATCH at no extra cost. It
+still does not share a register with the remaining count: reaching a packed
+offset costs a `swap` pair on every match segment, which is 0.11 to 0.40 swaps
+per output byte across the benchmark corpora.
 
 `jx1_decompress` (a0 = stream, a1 = destination) is the one-shot convenience:
 it runs the whole stream and returns with `a1` at the end of the output. It
 passes itself a budget of 65535, so a 32 KB output is one pass instead of 252
 — worth +4.2% to +16.3% over resuming at 127, for the same two bytes of code.
 
-Polling a finished stream keeps returning 0, and `a1` is where the output
-ends, on every call including the last. Matches are copied from the
+Polling a finished stream keeps leaving `d1.w = 0`, and `a1` is where the
+output ends, on every call including the last. Matches are copied from the
 destination itself — the output buffer is the window, so it must hold
 everything decompressed so far. To decompress into **bounded memory**, use one
 of the ring-buffer versions below.
@@ -189,13 +189,13 @@ so memory use is bounded by the buffer rather than by the output. Two files
 carry that to the 68000: [jx1_68000_ring.S](68k/jx1_68000_ring.S) takes any
 buffer and budget, and
 [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is smaller and faster when
-the budget divides the buffer (below). They share everything else — the same
+one fixed budget divides the buffer (below). They share everything else — the same
 parser, copy engine, entry work and interface — so read this section for
 both.
 
-Neither needs a callback or an extra return code: `jx1_resume` still returns
-just 0 (done) and 1 (more), and neither has a context block either. They take
-the same six state registers as the linear version plus the ring bounds,
+Neither needs a callback or a separate return register: `d1.w` is zero when
+done and nonzero when more remains, and neither has a context block either.
+They take the same five state registers as the linear version plus the ring bounds,
 read-only, in `a2.l`/`a3.l` — the caller holds those anyway, since it needs
 them to drain. `d4.w` is the budget, and `d4.w`/`d5.l`/`d6.l`/`a4.l` come back
 clobbered, exactly as for the linear version.
@@ -211,22 +211,41 @@ already have.
 ```
         lea     stream,a0
         lea     ring,a1                 ; N bytes; no alignment requirement
-        bsr     jx1_init                ; seeds d0-d3; writes no memory
+        bsr     jx1_init                ; seeds d0/d1/d3; writes no memory
         lea     ring,a2                 ; the state is all the caller's: bounds
         lea     ring+4096,a3            ; in a2/a3, write pointer in a1
-        movea.l a2,a6                   ; a6 = first undrained byte
 .loop:
         moveq   #16,d4                  ; at most 16 bytes from this call
         bsr     jx1_resume
-        ; consume [a6 .. a1)
-        movea.l a1,a6
+        moveq   #16,d6
+        sub.w   d4,d6                   ; bytes emitted = requested - unspent
+        movea.l a1,a4
+        suba.l  d6,a4                   ; first output byte for this call
+        ; consume [a4 .. a1)
         cmpa.l  a3,a1                   ; buffer full?
         bne.s   .more
-        movea.l a2,a6                   ; (ring_mod: also movea.l a2,a1)
+        movea.l a2,a1                   ; wrap explicitly for either version
 .more:
-        tst.w   d5
+        tst.w   d1
         bne.s   .loop
 ```
+
+That loop needs no `a6`: because 16 divides 4096, the budget is never clamped
+at a ring boundary, so the spent part of `d4` is exactly the emitted length;
+`d6` and `a4` are already caller-clobbered scratch. This works for `ring_mod`
+by definition, and for the general ring when every call uses the same X and X
+divides N. With arbitrary N/X, a boundary call is shortened before `d4` is
+spent, so save the old `a1` in memory or on the stack instead.
+
+The two bound registers in the generic ABI are deliberate: arbitrary ring
+placement and size are two independent values, and the match loop needs the
+start for underflow and the end for source room. A fixed-size build can keep
+only the end in `a3` and derive the start into scratch `a2` on entry with
+`lea -N(a3),a2` (for the useful N <= 32512 range): 4 bytes and 8 cycles per
+call in exchange for one fewer caller-held bound between calls; both bounds
+still exist inside `jx1_resume`. Runtime N can also be packed into an unused
+upper word and reconstructed, but that costs about 24 cycles per resume; the
+shipped generic decoder keeps both bounds to avoid that tax.
 
 Decoding the same stream, the ring costs this much over the linear version:
 
@@ -260,28 +279,28 @@ ladder itself never needs a bounds test.
 A call that runs into the end of the buffer therefore produces fewer than X
 bytes, so use the write pointer rather than an assumed budget.
 
-### When N is a multiple of X
+### When N is a multiple of one fixed X
 
 [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) is the same decompressor
-with that divisibility as a **requirement**, and spends it. `dst − start` is
-then a multiple of X at every entry — it starts at 0, a call returning 1 wrote
-exactly one budget, and a full buffer restarts at 0 — so the room is always
-a whole number of budgets and never fewer than one. The budget therefore needs
-no clamping at all: the entry drops the room arithmetic and keeps a single
-compare that restarts a full buffer at its first byte.
+with a fixed X that divides N as a **requirement**, and spends it. `dst − start`
+is then a multiple of X at every entry — it starts at 0, a call with
+`d1.w <> 0` wrote exactly X bytes, and the caller restarts a full buffer at 0
+— so the room is always a whole number of budgets and never fewer than one.
+The entry therefore drops the room arithmetic and clamp entirely; the caller
+wraps `a1` after draining a full buffer.
 
-**234 bytes, and faster than the general ring** — measured on
-the Atari ST, against the +1.5% to +3.7% the cycle model predicts. Both files
+**228 bytes, and faster than the general ring** — measured on
+the Atari ST at +1.6% to +5.0%, against +1.7% to +4.4% predicted. Both files
 carry the same entry work otherwise, so that difference is the price of the
 general ring's room arithmetic and nothing else.
 
-Every call also emits exactly X bytes and returns 1, except the final one,
-which returns 0 with whatever is left — `output mod X` bytes, or a full budget
-when X divides the output exactly. So a caller wanting fixed-size blocks gets
+Every call also emits exactly X bytes and leaves `d1.w <> 0`, except the final
+one, which leaves `d1.w = 0` with whatever is left — `output mod X` bytes, or
+a full budget when X divides the output exactly. So a caller wanting fixed-size blocks gets
 them for free — a property the ST harness checks on every call, across 42
-configurations. Feeding it a budget that does not divide
-the buffer runs the destination past the end, so use `jx1_68000_ring.S` when
-the caller cannot promise the ratio.
+configurations. Changing X between calls, or choosing an X that does not
+divide N, can run the destination past the end; use `jx1_68000_ring.S` when
+the caller cannot promise both requirements.
 
 ### Testing them
 

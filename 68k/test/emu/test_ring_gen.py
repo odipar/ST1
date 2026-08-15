@@ -1,4 +1,4 @@
-"""Differential test for the 0/1-return ring decompressor (jx1_68000_ring2.S).
+"""Differential test for the zero/nonzero-result ring decompressor.
 
 The caller drains after every call and spots the wrap itself: the write
 pointer never wraps mid-call, so "a1 == ring end" means the buffer is full
@@ -26,14 +26,14 @@ sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 
 from unicorn.unicorn_const import UC_HOOK_MEM_WRITE
-from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
-                                UC_M68K_REG_A3, UC_M68K_REG_A5, UC_M68K_REG_D5,
+from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
+                                UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_D5,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# What a caller may still pass junk in. d0-d3 carry the parse state and d4 is
+# What a caller may still pass junk in. d0/d1/d3 carry the parse state and d4 is
 # the budget, so the clobber set is what is left.
-CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6)
+CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6, UC_M68K_REG_A4)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
 # jx1_68000_ring.S wraps a full buffer itself at the next entry; ring_mod
 # requires the caller to. Both are legal callers of the general ring, and only
@@ -65,6 +65,7 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     uc.reg_write(UC_M68K_REG_A2, ring)              # ring bounds are parameters
     uc.reg_write(UC_M68K_REG_A3, ring + n)
     uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
+    uc.reg_write(UC_M68K_REG_D2, 0xD2D21234)
     uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
 
     out = bytearray()
@@ -86,11 +87,12 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         else:                                   # let the decoder wrap on entry
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_A2) == ring, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A3) == ring + n, 'a4 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A2) == ring, 'a2 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A3) == ring + n, 'a3 clobbered'
+        assert uc.reg_read(UC_M68K_REG_D2) == 0xD2D21234, 'd2 clobbered'
         if r == 0:
             break
-        assert r == 1, f'bad return {r} (this variant returns only 0/1)'
+        assert r > 0, f'bad remaining count {r}'
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
     assert uc.reg_read(UC_M68K_REG_D7) == 0xFEEDFACE, 'd7 clobbered'
     assert uc.reg_read(UC_M68K_REG_A6) == 0xCAFEBABE, 'a6 clobbered'

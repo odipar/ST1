@@ -2,7 +2,7 @@
 
 The ABI names the registers jx1_resume clobbers, which promises nothing about
 their incoming values - so a caller may legally pass anything in them. That
-set is now small: the parse state lives in d0/d1/d2/d3 and a0/a1 between calls,
+set is now small: the parse state lives in d0/d1/d3 and a0/a1 between calls,
 and d4 is the budget, which leaves d4, d5, d6 and a4.
 """
 import sys, importlib.util
@@ -69,12 +69,13 @@ for name, data, _ in t.testcases():
             failures += r != 'ok'
             print(f'{BIN:12s} {name:10s} N={n:5d} X={chunk:3d} poison={tag:26s} {r}{flag}')
 # The other half of the same contract: exactly which registers a call destroys.
-# Documented as d0/d1/d5/a2 - anything else surviving is what a caller relies on.
+# Canary every non-state register around one call; d2 is newly free.
 CANARY = 0x5A5A0000
-ALL = {'d4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5, 'd6': UC_M68K_REG_D6,
-       'd7': UC_M68K_REG_D7, 'a4': UC_M68K_REG_A4, 'a5': UC_M68K_REG_A5,
+ALL = {'d2': UC_M68K_REG_D2, 'd4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5,
+       'd6': UC_M68K_REG_D6, 'd7': UC_M68K_REG_D7, 'a2': UC_M68K_REG_A2,
+       'a3': UC_M68K_REG_A3, 'a4': UC_M68K_REG_A4, 'a5': UC_M68K_REG_A5,
        'a6': UC_M68K_REG_A6}
-STATE = ('d0', 'd1', 'd2', 'd3')          # plus a0/a1, and a2/a3 for the rings
+STATE = ('d0', 'd1', 'd3')                # plus a0/a1, and a2/a3 for the rings
 EXPECTED = {'d4', 'd5', 'd6', 'a4'}
 
 
@@ -83,13 +84,15 @@ def clobbered(data, n, chunk):
     uc = t.make_emu(comp)
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, t.DST)
     t.call(uc, t.CODE)
-    uc.reg_write(UC_M68K_REG_A2, t.DST); uc.reg_write(UC_M68K_REG_A3, t.DST + n)
-    for i, (name, reg) in enumerate(ALL.items()):
-        uc.reg_write(reg, CANARY | i)
-    uc.reg_write(UC_M68K_REG_D4, chunk)
+    initial = {name: CANARY | i for i, name in enumerate(ALL)}
+    initial['d4'] = chunk
+    if not LINEAR:
+        initial['a2'], initial['a3'] = t.DST, t.DST + n
+    for name, reg in ALL.items():
+        uc.reg_write(reg, initial[name])
     t.call(uc, ENTRY)
-    return {name for i, (name, reg) in enumerate(ALL.items())
-            if uc.reg_read(reg) != (CANARY | i)}
+    return {name for name, reg in ALL.items()
+            if uc.reg_read(reg) != initial[name]}
 
 
 data = next(d for n, d, _ in t.testcases() if n == 'word-soup')
