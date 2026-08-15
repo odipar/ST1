@@ -3,12 +3,13 @@
 Keep assets packed. Spend the RAM on the demo.
 
 ST1 is a small [ZX1](https://github.com/einar-saukas/ZX1) decompressor for the
-plain 68000. It can stop after a chosen number of output bytes and continue
-later. The ring version streams output through a small reusable buffer. After
-your code consumes a returned block, it need not keep a second copy; the
-decoder reuses that ring space later. The full output never has to fit in
-memory. This makes ST1 useful for loaders, effects, music, and other work that
-must share each video frame.
+plain 68000. ZX1 packs data very well while keeping the decoder small, which is
+why it was chosen for ST1. ST1 can stop after a chosen number of output bytes
+and continue later. The ring version streams output through a small reusable
+buffer. After your code consumes a returned block, it need not keep a second
+copy; the decoder reuses that ring space later. The full output never has to fit
+in memory. This makes ST1 useful for loaders, effects, music, and other work
+that must share each video frame.
 
 ## 68000 decoders
 
