@@ -232,7 +232,7 @@ for f in FILES:
     check(bool(re.search(r'add\.w\s+d5,d4\nbpl\.s\s+end_marker', code)),
           f'{f}: nonnegative decoded offsets select the end marker')
     ladder = ladder_remap.findall(code)
-    expected_ladder = [('7', '3')] if f == FILES[0] else [('15', '4')]
+    expected_ladder = [('15', '4')]
     check(ladder == expected_ladder and
           code.count('dbf d4,ladder') == 1 and
           'jmp ladder_end(pc,d4.w)' not in code and
