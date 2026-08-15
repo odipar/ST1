@@ -13,7 +13,7 @@
 ; is the match window and must retain all output. For bounded memory, use
 ; jx1_68000_ring.S.
 ;
-; 192 bytes, position-independent, one body: no macros, no tables, no
+; 208 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -138,11 +138,11 @@ budget_fits:
         movea.l a1,a2                   ; match: destination plus -lastOffset
         adda.w  d2,a2                   ; Java: readBufferByte(); a1 is the window
 source_ready:                           ; Java: writeByte(...) - n moves total:
-        moveq   #7,d5                   ; d5 = n&7, partial-pass dispatch
+        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
         and.w   d4,d5
-        lsr.w   #3,d4                   ; d4 = n>>3 full passes
+        lsr.w   #4,d4                   ; d4 = n>>4 full passes
         add.w   d5,d5
-        neg.w   d5                      ; index = -2*(n&7)
+        neg.w   d5                      ; index = -2*(n&15)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
         move.b  (a2)+,(a1)+             ; entry at ladder_end-2k copies k bytes
@@ -153,8 +153,16 @@ ladder:
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
 ladder_end:
-        dbf     d4,ladder               ; full eight-byte passes
+        dbf     d4,ladder               ; full 16-byte passes
 copy_done:
         tst.w   d2
         bmi.s   match_copied            ; matches consume no input here
@@ -170,7 +178,7 @@ literals_transition:
 
 match_copied:
         tst.w   d1
-        bne.s   suspend                 ; budget spent mid-op
+        bne.s   resume_return            ; budget spent mid-op; nearby shared RTS
         add.b   d0,d0                   ; Java: next(), case MATCH (bare read)
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
 
@@ -193,4 +201,5 @@ got_offset:
 
 end_marker:                             ; Java: State.DONE
         clr.w   d2                      ; d1.w is already zero; normalize DONE
+resume_return:
         rts                             ; a1 remains the output end

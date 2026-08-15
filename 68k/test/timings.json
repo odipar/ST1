@@ -1,5 +1,5 @@
 {
-  "fingerprint": "087c455dcffa0ff8b8e229ffad71177f63565aef2a0f76abc7d6844e9febe24d",
+  "fingerprint": "62a6a2909a38c9b2c2ac607f12139edcb20d94cb8473d826b150fbe073718d14",
   "hatari": {
     "calibration": {
       "linear": {
@@ -23,21 +23,21 @@
     "ticks": {
       "linear": {
         "m1024/127": {
-          "allsame": 81,
-          "farmatch": 69,
-          "maxoffset": 82,
-          "period129": 89,
-          "rle32k": 74,
-          "text": 78,
-          "wordsoup": 118
+          "allsame": 78,
+          "farmatch": 66,
+          "maxoffset": 79,
+          "period129": 85,
+          "rle32k": 70,
+          "text": 76,
+          "wordsoup": 117
         },
         "m1024/16": {
-          "allsame": 143,
-          "farmatch": 123,
-          "maxoffset": 141,
-          "period129": 152,
-          "rle32k": 133,
-          "text": 124,
+          "allsame": 141,
+          "farmatch": 121,
+          "maxoffset": 139,
+          "period129": 149,
+          "rle32k": 131,
+          "text": 122,
           "wordsoup": 142
         }
       },
@@ -55,7 +55,7 @@
     }
   },
   "inputs": {
-    "68k/jx1_68000.S": "ee62d8fbdea14a8cdb40380b1ef732ad7ddd025c36b283ba236b375a12ebb5c2",
+    "68k/jx1_68000.S": "990a97c2393f2f4c0a814ac030bf7e24623356f582c88da00309fa0f1a6e4ac3",
     "68k/jx1_68000_ring.S": "250e16577008eb2248e3b102b056dcac90f4924756361e31c4dc9558e04af33d",
     "68k/test/emu/cycle_model.py": "eedabbc007a46523c839dc96d711c5e9029b9c17588524dab41848965ebc0235",
     "68k/test/gendata.py": "db6da30b5898677c0db6f14bb92ba52ee7f58cf6e64ceea69dede23d8c74e2d7",
@@ -75,8 +75,8 @@
   "model": {
     "binaries": {
       "linear": {
-        "bytes": 192,
-        "sha256": "c83d7646629e02ff088bb8cd3a7681feb0ddce2b30b7090c23b1661a4dab3e1a"
+        "bytes": 208,
+        "sha256": "0c8848ba68d92771abd083ab2c11febef7dbe251a2bb8fafd3f8d4f3f125ce83"
       },
       "ring": {
         "bytes": 266,
@@ -86,31 +86,31 @@
     "cycles": {
       "linear": {
         "m1024/127": {
-          "allsame": 15656,
-          "farmatch": 44500,
-          "maxoffset": 527966,
-          "period129": 17042,
-          "rle32k": 474704,
-          "text": 7464,
-          "wordsoup": 148958
+          "allsame": 15044,
+          "farmatch": 42720,
+          "maxoffset": 507990,
+          "period129": 16416,
+          "rle32k": 455050,
+          "text": 7250,
+          "wordsoup": 147368
         },
         "m1024/16": {
-          "allsame": 27046,
-          "farmatch": 77240,
-          "maxoffset": 886578,
-          "period129": 28572,
-          "rle32k": 836982,
-          "text": 11576,
-          "wordsoup": 178488
+          "allsame": 26544,
+          "farmatch": 75798,
+          "maxoffset": 870344,
+          "period129": 28058,
+          "rle32k": 820984,
+          "text": 11412,
+          "wordsoup": 177762
         },
         "m256/16": {
-          "allsame": 27046,
-          "farmatch": 77240,
-          "maxoffset": 893500,
-          "period129": 28572,
-          "rle32k": 836982,
-          "text": 11576,
-          "wordsoup": 185270
+          "allsame": 26544,
+          "farmatch": 75798,
+          "maxoffset": 877290,
+          "period129": 28058,
+          "rle32k": 820984,
+          "text": 11412,
+          "wordsoup": 184840
         }
       },
       "ring": {
