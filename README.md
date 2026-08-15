@@ -4,15 +4,16 @@ Keep assets packed. Spend the RAM on the demo.
 
 ST1 is a small [ZX1](https://github.com/einar-saukas/ZX1) decompressor for the
 plain 68000. It can stop after a chosen number of output bytes and continue
-later. The ring version reuses a small buffer even when the full output is much
-larger. This makes it useful for loaders, effects, music, and other work that
+later. The ring version streams output through a small reusable buffer. After
+your code consumes a returned block, it need not keep a second copy; the
+decoder reuses that ring space later. The full output never has to fit in
+memory. This makes ST1 useful for loaders, effects, music, and other work that
 must share each video frame.
 
 ## 68000 decoders
 
-ST1 has two versions of the same decoder. Both read normal ZX1 data, run on a
-plain 68000, and keep their current position in five registers. Your code can
-set a maximum number of output bytes, stop, do other work, and continue later.
+ST1 provides two plain-68000 decoders. Both read standard ZX1 data and keep all
+their state in five registers.
 
 | File | Code | Use | Calls |
 |---|---:|---|---|
@@ -21,8 +22,19 @@ set a maximum number of output bytes, stop, do other work, and continue later.
 
 Use [ST1.S](68k/ST1.S) when the whole output fits in memory. It can decode the
 whole file with one call or stop and resume. Use
-[ST1_ring.S](68k/ST1_ring.S) when memory is tight. It reuses a fixed buffer;
-your code uses each returned block before asking for more.
+[ST1_ring.S](68k/ST1_ring.S) when memory is tight. It reuses a fixed buffer—the
+ring. Consume each returned block before its space is reused for later output.
+
+### Preparing files
+
+The 68000 decoders use 16-bit word (`.w`) counters for each piece they decode,
+so one piece cannot exceed 65535 output bytes. Use the Java `jx1` or C# `nx1`
+packing tool with `-l65535` to enforce this limit. If the tool warns that it
+cannot do so, do not use that output with ST1.
+
+For a ring smaller than 32512 bytes, also use `-mN`, where `N` is the ring size
+in bytes. This ensures that the decoder never needs data that has already left
+the ring.
 
 ### Trusted input only
 
@@ -30,125 +42,83 @@ The decoders do not check the input, buffer, or arguments. Bad data can read or
 write outside the buffers. Use trusted files made at build time, or validate
 them before decoding.
 
-- Compress with `-l65535`. A longer match is split. A longer literal run cannot
-  be split; the compressor warns about it, and that file is not safe for ST1.
-- A resume limit must be from 1 to 65535. Zero makes no progress.
-- A ring may be from 1 to 65535 bytes. For a ring smaller than 32512 bytes,
-  compress that stream with the matching `-mN`.
+- Ask `ST1_resume` for between 1 and 65535 bytes. Zero makes no progress.
+- A ring may be from 1 to 65535 bytes.
 - Keep the input, output, and saved registers valid until decoding ends.
 
 ### Calls and registers
 
-Keep these five values between calls:
+- State: `a0.l`, `a1.l`, `d0.b`, `d1.w`, `d2.w`; for the ring version, save
+  all of `d1.l` and `d2.l`.
+- `ST1_init`: input in `a0`, output in `a1`; ring end in `d3.l`.
+- `ST1_resume`: byte limit in `d3.w`; `d1.w = 0` means done.
+- May change: `a2`, `d3`–`d5`. Unchanged: `d6`, `d7`, `a3`–`a6`.
 
-| Register | Meaning |
-|---|---|
-| `a0.l` | packed input position |
-| `a1.l` | output write position |
-| `d0.b` | compressed bits |
-| `d1.w` | bytes left; zero after resume means finished |
-| `d2.w` | last match distance and current step |
+## Use case: streaming YM6
 
-For the ring decoder, save all of `d1.l` and `d2.l`; their upper words also
-hold the ring limits.
+The [YM6 format](https://www.lynn3686.com/ym3456_tidy.html) is a chiptune dump:
+it stores the values written to the YM2149 sound chip for every video frame,
+along with song details and optional effects. At 50 Hz, its 14 sound registers
+use about 41 KiB per minute, although the player only needs the values it is
+about to play. That makes it a good fit for ST1's streaming model: the player
+handles the YM6 layout and sound registers, while ST1 supplies decompressed
+bytes in small chunks.
 
-To start, put the input in `a0` and the output start in `a1`, then call
-`ST1_init`. Ring setup also takes the address just after the ring in `d3.l`.
-Before every `ST1_resume`, put a fresh output limit in `d3.w`.
+Here is one possible player design. YM6 has an interleaved format option that
+stores one vector for each of its 16 fields: every R0 value, then every R1 value,
+through R15. Now let's pack the R0–R13 sound-register vectors as separate ZX1
+streams. Values from the same register tend to repeat, so these streams compress
+well. A player that supports YM6 effects must also handle their extra data.
 
-Both decoders may change `d3`, `d4`, `d5`, and `a2`. They leave `d6`, `d7`, and
-`a3`–`a6` unchanged.
-
-The linear `ST1_decompress` call decodes the whole file. Its output buffer must
-keep all earlier output because matches may refer to it.
-
-The ring call returns new bytes between the old and new `a1`. Use those bytes
-before the next call. A call can return fewer bytes at the ring end or file end.
-After draining the ring end, move `a1` back to the ring start. The source files
-above contain complete calling examples.
-
-## Example: streaming YM6
-
-YM6 playback is one example of why the ring decoder is useful. A 50 Hz dump of
-the YM2149's 14 sound registers uses about 41 KiB per minute, while the player
-only needs the next value for each register.
-
-For better compression, convert the YM6 file into one byte stream per register
-before packing it:
+Give each register stream its own saved decoder state and small ring, then fill
+each ring with a group of 16 values, numbered 0–15. A vertical blank (VBL) is
+one screen refresh. On each VBL, use the next numbered value from every register
+and refill just one register with its next group:
 
 ```text
-R0:  frame 0, frame 1, frame 2, ... → ZX1 stream 0 → small buffer 0
-R1:  frame 0, frame 1, frame 2, ... → ZX1 stream 1 → small buffer 1
+VBL  0: use value  0 from every register; refill R0
+VBL  1: use value  1 from every register; refill R1
 ...
-R13: frame 0, frame 1, frame 2, ... → ZX1 stream 13 → small buffer 13
+VBL 13: use value 13 from every register; refill R13
+VBL 14: use value 14 from every register; no register refill
+VBL 15: use value 15 from every register; no register refill
 ```
 
-Values from the same register tend to repeat, so they compress much better
-together. Extra YM6 effect data can use extra streams when the player supports
-it.
+After VBL 15, start again at R0. This round-robin schedule spreads the work
+evenly, and each decoder call prepares 16 VBLs for one register. Measure the
+slowest refill with the final tune because the byte limit is not a time limit.
 
-Start by decoding 16 values for every register. During playback, use one value
-from every current block each video frame (VBL) and refill only one register
-with its next 16 values:
+With 1024-byte rings and 16-byte calls, the tests report whole-stream averages
+of about 28–69 cycles per output byte. Using 70 as a planning estimate gives
+about `16 × 70 = 1120` decompression cycles for the single refill each VBL. This
+excludes switching streams and writing the YM registers.
 
-```text
-VBL  0: play value  0; refill R0
-VBL  1: play value  1; refill R1
-...
-VBL 13: play value 13; refill R13
-VBL 14: play value 14; free, or refill effect data
-VBL 15: play value 15; free, or refill effect data
-```
-
-After VBL 15, start again at R0. Each decoder setup now produces 16 useful
-values instead of one. The limit is a byte count, not a time limit, so measure
-the slowest refill for the final tune.
-
-With a 1024-byte ring and 16-byte calls, the current tests range from about 28
-to 69 cycles per output byte, depending on the data. Using 70 cycles per byte is
-a safe first estimate: one 16-byte refill costs about `16 × 70 = 1120` cycles.
-A 16-stream player does one such refill per VBL, or about 1120 decompression
-cycles per VBL. This number does not include saving the selected stream,
-writing the YM registers, or loading packed data.
-
-For this player, use rings of at least 32 bytes with sizes divisible by 16. A
-128-byte ring holds 2.56 seconds of one register's past values at 50 Hz; 14
-rings use 1792 bytes. Put equal-sized rings next to each other and moving to the
-same place in the next ring becomes one add. With a fixed order, the player can
-also share the write position. The decoder code may be placed directly in the
-player loop so decoding, saving state, and moving to the next buffer happen
-together.
-
-ST1 only decompresses bytes. Your code must convert YM6, play the registers,
-and provide the packed input.
+Use equal, adjacent rings in multiples of 16, with at least 32 bytes per ring so
+the current and next groups both fit. The player can then move to the next ring
+with one add and combine that update with the decoder code.
 
 ## ST1 and MinYMiser
 
-This YM example is directly inspired by
-[MinYMiser](https://clarets.org/steve/projects/minymiser.html). Both split YM
-data by register and keep only a small amount of old output.
+This YM use case is directly inspired by
+[MinYMiser](https://clarets.org/steve/projects/minymiser.html).
 
-MinYMiser uses a custom compressor made for YM music and one tight loop that
-advances all 13 stored streams every VBL; it folds the mixer register into the
-volume streams. ST1 can use the same 13-stream layout, or a simpler 14-stream
-layout. It uses ZX1 because it compresses well and has a small decoder. Each
-VBL it advances one stream by 16 values, then moves to the next stream.
-
-MinYMiser has very small saved state and reads one packed input in order. ST1
-uses separate ZX1 streams, spreads the work across VBLs, and reuses the same
-decoder for other data. Both can group equal buffers and combine the decoder
-with the player loop. Which is smaller or faster depends on the tune; a fair
-answer needs both players tested with the same input and memory limits.
+MinYMiser uses a custom YM compressor and advances its register streams together
+every VBL. A future MinYMiser-style player built with ST1 would use ZX1 and
+advance one 16-value group per VBL in round-robin order. Its ST1 decoder could
+also serve other streamed data in the demo. Which player is smaller or faster
+depends on the tune; a fair answer needs both tested with the same input and
+memory limits.
 
 ## Compatibility with ZX1
 
-ST1, jx1, and nx1 use the normal ZX1 format. With no options, jx1 and nx1 make
-the same bytes as the original C compressor. `-mN` changes which matches are
-chosen and `-lN` limits their length; neither changes the file format.
+ST1, jx1, and nx1 use the standard ZX1 format. With no options, jx1 and nx1
+produce the same bytes as the original ZX1 C compressor. The `-mN` and `-lN`
+options described above only change how data is packed, not the file format.
 
-[68k/test/emu/compat.py](68k/test/emu/compat.py) builds the original `zx1` and
-`dzx1`, compares their output with jx1, and checks that each implementation can
-read the other's files. The C# tests use the same Java and original-C examples.
+[68k/test/emu/compat.py](68k/test/emu/compat.py) compares jx1 output byte for
+byte with the original ZX1 C compressor, checks both sets of files with both
+decompressors, and runs the ST1 decoders on C-produced streams. The C# tests use
+the same reference examples.
 
 ## Tests and speed
 
@@ -176,12 +146,13 @@ Build and run the Java tools:
 
 ```sh
 mvn package
-java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
-java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
+java -ea -cp target/classes org.jx1.Jx1  [-mN] [-lN] input [output.zx1]
+java -ea -cp target/classes org.jx1.Djx1 [-mN] input.zx1 [output]
 ```
 
-`-mN` limits match distance, and `-lN` limits run length. Keep `-ea` when
-running the classes directly because input checks use Java assertions.
+For `jx1`, `-mN` limits how far the packed data can look back; for `djx1`, it
+sets the ring size. `-lN` limits the output bytes in one packed piece. Keep `-ea`
+when running the classes directly because input checks use Java assertions.
 
 The Java `Decompressor` can also stop after a chosen number of bytes:
 
@@ -191,21 +162,22 @@ while (decompressor.resume()) {
 }
 ```
 
-The C# tools have the same options and API:
+The C# tools mirror the Java options and API:
 
 ```sh
-dotnet run --project csharp/src/Nx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
-dotnet run --project csharp/src/Dnx1.Cli -- [-f] [-mN] input.zx1 [output]
+dotnet run --project csharp/src/Nx1.Cli -- [-mN] [-lN] input [output.zx1]
+dotnet run --project csharp/src/Dnx1.Cli -- [-mN] input.zx1 [output]
 ```
 
 See [csharp/README.md](csharp/README.md) for the .NET library and build steps.
 
 ## Names and files
 
-The Atari ST was always the target. Java `jx1` and C# `nx1` are the tools and
-readable reference versions used to test the handwritten `ST1.S` code. The
-names follow a small demoscene joke: `ZX1` signs the ZX Spectrum version, `ST1`
-signs the Atari ST version, and the host tools stay lowercase.
+The Atari ST was always the target. Java `jx1` is the readable reference used by
+the tests for the handwritten `ST1.S` code; C# `nx1` is an independent port of
+the same tooling. The names follow a small demoscene joke: `ZX1` signs the ZX
+Spectrum version, `ST1` signs the Atari ST version, and the host tools stay
+lowercase.
 
 Assembly and Atari tests are in [`68k/`](68k/), Java is in `src/`, and C# is in
 [`csharp/`](csharp/). Tagged builds are on
@@ -215,7 +187,7 @@ Assembly and Atari tests are in [`68k/`](68k/), Java is in `src/`, and C# is in
 
 The license follows the original ZX1; see [LICENSE](LICENSE). The compressor is
 BSD 3-Clause. The decompressors may be used freely, including commercially, if
-their documentation says that ZX1 was used through ST1, jx1, or nx1.
+your program's documentation says that ZX1 was used through ST1, jx1, or nx1.
 
 The ZX1 format and algorithm are by Einar Saukas. The additions are © 2026
 Robbert van Dalen. Claude (Anthropic's Claude Code) wrote the Java, ST1/68000,
