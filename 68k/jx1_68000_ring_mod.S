@@ -17,7 +17,7 @@
 ; ring; the decompressor receives no ring bounds because a1's low bits give its
 ; position and the compiled RING_SIZE gives the wrap distance.
 ;
-; 212 bytes, position-independent, one body: no macros, no tables, no
+; 200 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -72,8 +72,8 @@
 ;   untouched    d6 d7 a3 a4 a5 a6   and the stack beyond the return address
 ;
 ; a2 is the literal or recomputed match source. d4 is gamma/offset scratch and
-; the copy count; d5 is position, room and ladder scratch. d1.w is also the
-; result: zero means done, nonzero means more.
+; the copy count; d5 is position, room, offset and ladder scratch. d1.w is
+; also the result: zero means done, nonzero means more.
 ; Pass X in d3.w again on every call; completed streams keep returning d1.w=0.
 ;
 ; ASSUMPTIONS. Undefined behaviour when violated, because nothing checks them:
@@ -131,11 +131,11 @@ jx1_init:
 jx1_resume:
         tst.w   d1                      ; zero survives only for START or DONE
         beq.s   entry_special           ; suspended operations have d1 >= 1
+        move.w  d3,d4                   ; seed n from the nonzero budget
 segment:                                ; d1 remaining >= 1, d3 budget >= 1
-        move.w  d1,d4                   ; n = min(remaining, budget)
-        cmp.w   d3,d4
+        cmp.w   d1,d4                   ; n = min(budget, remaining)
         bls.s   budget_fits
-        move.w  d3,d4
+        move.w  d1,d4
 budget_fits:
         tst.w   d2                      ; positive lastOffset means LITERALS
         bpl.s   literal_source
@@ -186,17 +186,16 @@ ladder_end:
         bne.s   resume_return            ; literals can stop only on the budget
 
 literals_transition:
-        neg.w   d2                      ; both successors enter State.MATCH
         add.b   d0,d0                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
-        moveq   #0,d4                   ; from-last match: remaining = gamma
-        bra.s   get_gamma               ; Java: beginMatchFromLastOffset()
+        neg.w   d2                      ; from-last reuses the negated offset
+        bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
 
 match_copied:
         tst.w   d1
         beq.s   match_transition
 resume_fresh:                           ; gamma or a split match may continue
-        tst.w   d3
+        move.w  d3,d4                   ; test budget and seed the next segment
         bne.s   segment                 ; budget left: continue the current op
 resume_return:                          ; return the current d1.w result
         rts                             ; zero = DONE; nonzero = more output
@@ -207,6 +206,7 @@ entry_special:                          ; d1 = 0: only START or DONE survives a 
 
 begin_literals:                         ; Java: beginLiterals()
         neg.w   d2                      ; positive lastOffset = State.LITERALS
+gamma_seed0:
         moveq   #0,d4                   ; remaining = gamma + 0; fall through
 
 ; Java: readInterlacedEliasGamma(). Decode d1.w with d4.w = 0, or 1 for a
@@ -239,22 +239,19 @@ match_transition:                       ; remaining == 0: parse after a match
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
-        clr.w   d2                      ; replace the old offset; preserve d2.high
-        move.b  (a0)+,d2
-        lsr.b   #1,d2                   ; carry = low bit selects the two-byte form
-        bcs.s   two_byte
-        sub.w   #128,d2                 ; -offset = value/2 - 128
-        bra.s   got_offset
+        move.b  (a0)+,d4                ; DBF left $ffff; transition left X=1
+        roxr.b  #1,d4                   ; $ff80 + low/2; carry selects two bytes
+        bcc.s   got_offset
 two_byte:
-        moveq   #0,d4
-        move.b  (a0)+,d4
-        lsr.b   #1,d4                   ; d4 = high >> 1, X = high & 1
-        addx.w  d2,d2                   ; (low & 254) + (high & 1) in one go
-        lsl.w   #8,d4
-        add.w   d4,d2                   ; (high>>1)*256 + (low&254) + (high&1)
-        sub.w   #32512,d2               ; -offset = decoded value - 32512
+        move.b  (a0)+,d5
+        roxr.b  #1,d5                   ; $ff80 + high/2; X = high & 1
+        addx.w  d4,d4                   ; $ff00 + (low&254) + (high&1)
+        addq.b  #2,d5                   ; fold the -32512 bias into the high byte
+        lsl.w   #8,d5                   ; stale d5 word-high shifts out
+        add.w   d5,d4
         bpl.s   end_marker              ; nonnegative is the end marker
 got_offset:
+        move.w  d4,d2                   ; install -lastOffset; preserve d2.high
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma
 

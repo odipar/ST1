@@ -71,11 +71,16 @@ for f in FILES:
     offset_decode = src[src.index('new_offset:'):src.index('got_offset:')]
     check('moveq   #0,d1' not in offset_head and 'clr.w   d1' not in offset_head,
           f'{f}: no dead clear before new_offset')
-    check('addx.w  d2,d2' in offset_decode, f'{f}: two-byte offset folds the carry')
-    check('sub.w   #128,d2' in offset_decode and
-          'sub.w   #32512,d2' in offset_decode and
-          'neg.w   d2' not in offset_decode and 'move.w  d4,d2' not in src,
-          f'{f}: offset decode produces -lastOffset directly')
+    check('roxr.b  #1,d4' in offset_decode and
+          'roxr.b  #1,d5' in offset_decode and
+          'addx.w  d4,d4' in offset_decode,
+          f'{f}: offset decoder folds both selector carries')
+    check('move.w  d4,d2' in src and
+          'addq.b  #2,d5' in offset_decode and
+          'sub.w   #128,d2' not in offset_decode and
+          'sub.w   #32512,d2' not in offset_decode and
+          'neg.w   d2' not in offset_decode,
+          f'{f}: offset decoder reuses DBF -1 and produces -lastOffset directly')
     check('adda.w  d2,a2' in src,
           f'{f}: match source consumes the negated offset directly')
 
@@ -203,8 +208,30 @@ gamma_core = re.compile(
 literal_gamma_fallthrough = re.compile(
     r'begin_literals:\n'
     r'neg\.w\s+d2\n'
+    r'gamma_seed0:\n'
     r'moveq\s+#0,d4\n'
     r'get_gamma:')
+literal_transition = re.compile(
+    r'literals_transition:\n'
+    r'add\.b\s+d0,d0\n'
+    r'bcs\.s\s+new_offset\n'
+    r'neg\.w\s+d2\n'
+    r'bra\.s\s+gamma_seed0')
+offset_decoder = re.compile(
+    r'new_offset:\n'
+    r'move\.b\s+\(a0\)\+,d4\n'
+    r'roxr\.b\s+#1,d4\n'
+    r'bcc\.s\s+got_offset\n'
+    r'two_byte:\n'
+    r'move\.b\s+\(a0\)\+,d5\n'
+    r'roxr\.b\s+#1,d5\n'
+    r'addx\.w\s+d4,d4\n'
+    r'addq\.b\s+#2,d5\n'
+    r'lsl\.w\s+#8,d5\n'
+    r'add\.w\s+d5,d4\n'
+    r'bpl\.s\s+end_marker\n'
+    r'got_offset:\n'
+    r'move\.w\s+d4,d2')
 for f in FILES:
     code = instruction_text((K68 / f).read_text())
     check(not re.search(r'\bbsr(?:\.[a-z])?\s+get_gamma\b', code),
@@ -215,15 +242,16 @@ for f in FILES:
           f'{f}: gamma value is built directly in d1.w')
     check(bool(literal_gamma_fallthrough.search(code)),
           f'{f}: literal entry falls directly into get_gamma')
-    check(bool(re.search(
-        r'new_offset:\nclr\.w\s+d2\nmove\.b\s+\(a0\)\+,d2\nlsr\.b\s+#1,d2',
-        code)), f'{f}: new offsets are decoded directly in d2.w')
+    check(bool(literal_transition.search(code)),
+          f'{f}: from-last matches share the zero gamma seed')
+    check(bool(offset_decoder.search(code)),
+          f'{f}: new offsets reuse DBF/X and decode directly in d2.w')
     check(bool(re.search(r'tst\.w\s+d2\nbpl\.s\s+(?:source_ready|literal_source)',
                          code)),
           f'{f}: positive state selects literals')
     check(bool(re.search(r'tst\.w\s+d2\nbmi\.s\s+match_copied', code)),
           f'{f}: negative state selects the match tail')
-    check(bool(re.search(r'sub\.w\s+#32512,d2\nb(?:pl|ge)\.s\s+end_marker', code)),
+    check(bool(re.search(r'add\.w\s+d5,d4\nbpl\.s\s+end_marker', code)),
           f'{f}: nonnegative decoded offsets select the end marker')
     check(len(ladder_remap.findall(code)) == 1 and
           code.count('dbf d4,ladder') == 1 and
@@ -233,11 +261,41 @@ for f in FILES:
     check('and.w #7,d4' not in code,
           f'{f}: ladder has no old immediate mask into d4')
 
+# The pinned ROXR sequence folds both the short-offset and -32512 biases into
+# bytes that started at $ff. Check its word result against the format formula
+# for every selector encoding, including the end marker and reserved values.
+offset_mismatches = []
+for low in range(256):
+    if not low & 1:
+        got = 0xff00 | (0x80 | (low >> 1))
+        want = ((low >> 1) - 128) & 0xffff
+        if got != want:
+            offset_mismatches.append((low, None, got, want))
+        continue
+    for high in range(256):
+        low_word = 0xff00 | (0x80 | (low >> 1))
+        folded_low = (2 * low_word + (high & 1)) & 0xffff
+        folded_high = ((0x80 | (high >> 1)) + 2) & 0xff
+        got = (folded_low + (folded_high << 8)) & 0xffff
+        raw = (high >> 1) * 256 + (low & 254) + (high & 1)
+        want = (raw - 32512) & 0xffff
+        if got != want:
+            offset_mismatches.append((low, high, got, want))
+check(not offset_mismatches,
+      f'ROXR offset algebra matches all encodings ({offset_mismatches[:1]})')
+
 for f in FILES[1:]:
     code = instruction_text((K68 / f).read_text())
     gamma_tail = code[code.index('gamma_done:'):code.index('gamma_refill:')]
     check('resume_fresh:' in code and 'bra.s resume_fresh' in gamma_tail,
           f'{f}: woven gamma tail routes through resume_fresh')
+    check(bool(re.search(
+        r'move\.w\s+d3,d4\nsegment:\ncmp\.w\s+d1,d4\n'
+        r'bls\.s\s+budget_fits\nmove\.w\s+d1,d4', code)),
+          f'{f}: segment min starts from the seeded budget')
+    check(bool(re.search(
+        r'resume_fresh:\nmove\.w\s+d3,d4\nbne\.s\s+segment', code)),
+          f'{f}: continuation test also seeds the next segment')
     check(bool(re.search(r'add\.w\s+d2,d5\nbcs\.s\s+copy', code)),
           f'{f}: offset addition carry selects an unwrapped ring source')
 

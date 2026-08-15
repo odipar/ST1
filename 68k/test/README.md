@@ -288,7 +288,9 @@ into `d2.high`, avoiding persistent bound registers.
 The parser decodes gamma values directly into `d1.w` and negative offsets
 directly into `d2.w`. Split literal/match tails avoid repeated state tests,
 and the ring decoders keep START/DONE dispatch out of the hot resume path.
-The resulting linear/general-ring/`ring_mod` bodies are **206/252/212 bytes**.
+The copy ladder and transition bit seed the compact offset decoder; ring
+segments likewise reuse their budget seed for the continuation test.
+The resulting linear/general-ring/`ring_mod` bodies are **192/240/200 bytes**.
 
 The complete `run.sh` pass produced the raw 200 Hz ticks below, in corpus order
 `text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`; every correctness
@@ -296,10 +298,10 @@ shape in the same executables also passed.
 
 | decoder | code | N/X | ST ticks |
 |---|---:|---|---|
-| linear | 206 B | —/16 | 125/140/123/152/144/133/139 |
-| general ring | 252 B | 1024/16 | 145/176/145/178/170/159/155 |
-| `ring_mod` | 212 B | 256/16 | 144/174/142/178/167/156/153 |
-| `ring_mod` | 212 B | 1024/16 | 141/171/139/172/163/153/152 |
+| linear | 192 B | —/16 | 124/137/123/152/143/133/139 |
+| general ring | 240 B | 1024/16 | 144/171/144/178/170/159/155 |
+| `ring_mod` | 200 B | 256/16 | 143/170/142/178/167/156/152 |
+| `ring_mod` | 200 B | 1024/16 | 140/166/139/171/163/153/152 |
 
 At the directly comparable 1024/16 shape, the fixed decoder remains faster
 on every corpus, by **1.9% to 4.1%**. Neither decoder has a persistent bound
@@ -318,7 +320,7 @@ actually made on — hold within **1.3%**: predicted chunk-16 / chunk-127
 ratios of 1.31–2.20 against 1.29–2.20 measured.
 
 Measurement resolution is ±1 tick, i.e. 0.4–1.3% per figure; the calibration
-loop itself lands on 240 or 241 ticks depending on where the program's code
+loop itself lands between 240 and 242 ticks depending on where the program's code
 falls relative to the interrupts. Hatari settings:
 `--machine st --cpuclock 8 --cpu-exact on --compatible on` (cycle-exact 68000
 with prefetch), plus `--disable-video 1` to run headless — that flag only
