@@ -56,20 +56,28 @@ for f in FILES:
     # init writes nothing: it seeds the three registers that are not pointers.
     # The sign of lastOffset is the active-op state; d1/d2 encode START/DONE.
     check('moveq   #-128,d0' in src, f'{f}: init seeds the bit queue with $80')
-    check(re.search(r'(?:moveq|move\.w|addq\.w)\s+#1,d2', src),
-          f'{f}: init encodes START with lastOffset = +1')
-    check('tst.w   d1' in src and 'beq.s   entry_special' in src,
+    check('moveq   #-1,d2' in src,
+          f'{f}: init encodes START with -lastOffset = -1')
+    check('tst.w   d1' in src and
+          ('beq.s   entry_special' in src or 'bne.s   op_body' in src),
           f'{f}: zero remaining dispatches START/DONE')
     check(src.count('neg.w   d2') == 2,
           f'{f}: lastOffset sign flips exactly at both LITERALS/MATCH transitions')
     check('tst.w   d2' in src, f'{f}: active-op dispatch tests signed lastOffset')
     end = src[src.index('end_marker:'):]
-    check('clr.w   d1' in end and 'clr.w   d2' in end,
-          f'{f}: DONE normalizes remaining and lastOffset for repeat polling')
+    check('clr.w   d1' not in end and 'clr.w   d2' in end,
+          f'{f}: DONE reuses proven-zero remaining and normalizes lastOffset')
     offset_head = src[src.index('new_offset:'):src.index('two_byte:')]
+    offset_decode = src[src.index('new_offset:'):src.index('got_offset:')]
     check('moveq   #0,d1' not in offset_head and 'clr.w   d1' not in offset_head,
           f'{f}: no dead clear before new_offset')
-    check('addx.w  d1,d1' in src, f'{f}: two-byte offset folds the carry')
+    check('addx.w  d2,d2' in offset_decode, f'{f}: two-byte offset folds the carry')
+    check('sub.w   #128,d2' in offset_decode and
+          'sub.w   #32512,d2' in offset_decode and
+          'neg.w   d2' not in offset_decode and 'move.w  d4,d2' not in src,
+          f'{f}: offset decode produces -lastOffset directly')
+    check('adda.w  d2,a2' in src,
+          f'{f}: match source consumes the negated offset directly')
 
 # 6. no stale ctx_alloc, no stale 15-byte wording anywhere current
 for f in FILES + ['test/jx1_hatari.S', 'test/jx1_hatari_ring.S']:
@@ -154,8 +162,8 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    state_words = ('signed last offset in the low word' if f == FILES[1]
-                   else 'd2.w  signed last offset')
+    state_words = ('signed offset/state in the low word' if f == FILES[1]
+                   else 'd2.w  signed offset/state')
     check(state_words in src, f'{f}: the header maps the folded state')
 linear_body = '\n'.join(l for l in (K68 / FILES[0]).read_text().splitlines()
                         if not l.lstrip().startswith(';'))
@@ -187,7 +195,11 @@ ladder_remap = re.compile(
     r'add\.w\s+d5,d5\n'
     r'neg\.w\s+d5\n'
     r'jmp\s+ladder_end\(pc,d5\.w\)')
-woven_tail = re.compile(r'gamma_done:\nadd\.w\s+d4,d5\nmove\.w\s+d5,d1')
+woven_tail = re.compile(r'gamma_done:\nadd\.w\s+d4,d1')
+gamma_core = re.compile(
+    r'get_gamma:\n'
+    r'addq\.w\s+#1,d1[\s\S]*?'
+    r'addx\.w\s+d1,d1')
 literal_gamma_fallthrough = re.compile(
     r'begin_literals:\n'
     r'neg\.w\s+d2\n'
@@ -199,8 +211,20 @@ for f in FILES:
           f'{f}: gamma decoder is woven in, with no BSR get_gamma')
     check(bool(woven_tail.search(code)),
           f'{f}: gamma tail adds the d4 seed and installs d1.w')
+    check(bool(gamma_core.search(code)),
+          f'{f}: gamma value is built directly in d1.w')
     check(bool(literal_gamma_fallthrough.search(code)),
           f'{f}: literal entry falls directly into get_gamma')
+    check(bool(re.search(
+        r'new_offset:\nclr\.w\s+d2\nmove\.b\s+\(a0\)\+,d2\nlsr\.b\s+#1,d2',
+        code)), f'{f}: new offsets are decoded directly in d2.w')
+    check(bool(re.search(r'tst\.w\s+d2\nbpl\.s\s+(?:source_ready|literal_source)',
+                         code)),
+          f'{f}: positive state selects literals')
+    check(bool(re.search(r'tst\.w\s+d2\nbmi\.s\s+match_copied', code)),
+          f'{f}: negative state selects the match tail')
+    check(bool(re.search(r'sub\.w\s+#32512,d2\nb(?:pl|ge)\.s\s+end_marker', code)),
+          f'{f}: nonnegative decoded offsets select the end marker')
     check(len(ladder_remap.findall(code)) == 1 and
           code.count('dbf d4,ladder') == 1 and
           'jmp ladder_end(pc,d4.w)' not in code and
@@ -214,6 +238,8 @@ for f in FILES[1:]:
     gamma_tail = code[code.index('gamma_done:'):code.index('gamma_refill:')]
     check('resume_fresh:' in code and 'bra.s resume_fresh' in gamma_tail,
           f'{f}: woven gamma tail routes through resume_fresh')
+    check(bool(re.search(r'add\.w\s+d2,d5\nbcs\.s\s+copy', code)),
+          f'{f}: offset addition carry selects an unwrapped ring source')
 
 # Linear and ring_mod expose only d1.w/d2.w. Their caller-owned upper halves
 # must never become accidental scratch on resume. The general ring deliberately
@@ -238,9 +264,11 @@ for f in FILES:
 # The general ring consumes its end pointer only at init, packing N into
 # d1.high and end.low into d2.high; resume has no persistent bound register.
 ring_src = (K68 / FILES[1]).read_text()
-ring_init = ring_src[ring_src.index('jx1_init:'):ring_src.index('entry_special:')]
-check(re.search(r'\bd3\b', ring_init) and re.search(r'\bd2\b', ring_init) and
-      'swap    d2' in ring_init,
+ring_init = instruction_text(
+    ring_src[ring_src.index('jx1_init:'):ring_src.index('jx1_resume:')])
+check(bool(re.search(
+      r'move\.l\s+d3,d1\nsub\.l\s+a1,d1\nswap\s+d1\n'
+      r'moveq\s+#-1,d2\nmove\.w\s+d3,d2\nswap\s+d2', ring_init)),
       'general ring init packs transient d3 end.low into d2.high')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')

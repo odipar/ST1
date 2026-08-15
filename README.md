@@ -64,9 +64,9 @@ state in registers:
 
 | File | Code | Output | Entries |
 |---|---:|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 220 B | linear buffer containing the whole output and match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 266 B | arbitrary caller-supplied ring of N bytes | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 224 B | aligned power-of-two ring with fixed budget X | `jx1_init`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 206 B | linear buffer containing the whole output and match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 252 B | arbitrary caller-supplied ring of N bytes | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 212 B | aligned power-of-two ring with fixed budget X | `jx1_init`, `jx1_resume` |
 
 Entries are four-byte jump slots in table order. Use the linear decoder unless
 output must pass through bounded memory; ring decoders have no one-shot entry
@@ -102,9 +102,9 @@ apart from the documented `a1` wrap required by a ring decoder:
 | `a1.l` | write pointer; end of output produced so far |
 | `d0.b` | bit queue |
 | `d1.w` | bytes remaining; zero on return from `jx1_resume` means done |
-| `d2.w` | signed last offset: negative in LITERALS, positive in MATCH |
+| `d2.w` | signed offset/state: `+lastOffset` in LITERALS, `-lastOffset` in MATCH |
 
-With `d1.w = 0`, `d2.w = +1` means START and zero means DONE. After
+With `d1.w = 0`, `d2.w = -1` means START and zero means DONE. After
 initialization, the linear and `ring_mod` resume entries preserve the unused
 high parts of `d0`, `d1`, and `d2`. The general ring instead keeps N in
 `d1.high` and `end.low` in `d2.high`, so its full `d1.l` and `d2.l` are state.
@@ -234,10 +234,10 @@ Current raw 200 Hz ticks at X=16, in corpus order
 
 | Decoder | N/X | ST ticks |
 |---|---|---|
-| linear | —/16 | 128/146/126/155/146/136/141 |
-| general ring | 1024/16 | 147/182/145/179/170/159/158 |
-| `ring_mod` | 256/16 | 145/181/143/179/167/156/155 |
-| `ring_mod` | 1024/16 | 143/177/140/172/164/153/155 |
+| linear | —/16 | 125/140/123/152/144/133/139 |
+| general ring | 1024/16 | 145/176/145/178/170/159/155 |
+| `ring_mod` | 256/16 | 144/174/142/178/167/156/153 |
+| `ring_mod` | 1024/16 | 141/171/139/172/163/153/152 |
 
 [68k/test/README.md](68k/test/README.md) documents the correctness matrix,
 boundary and ABI checks, emulator limitations, and measurement method.

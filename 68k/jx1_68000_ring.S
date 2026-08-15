@@ -11,7 +11,7 @@
 ; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
 ; N and every back-reference must fit it; for N below 32512, compress with -mN.
 ;
-; 266 bytes, position-independent, one body: no macros, no tables, no
+; 252 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -47,8 +47,8 @@
 ; source crossing the end splits the copy, and is recomputed for each segment.
 ; N in d1.high and end.low in d2.high replace bound registers. The low-word
 ; identity position = N + destination - end is exact across 64-K boundaries;
-; carry from unsigned position-offset detects a wrapped source, restored by
-; adding N. Bounds work is per call and per match segment, never per byte.
+; adding -offset sets carry for an unwrapped source; otherwise adding N
+; restores it. Bounds work is per call and per match segment, never per byte.
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. jx1_init seeds it; preserve all five between
@@ -58,9 +58,9 @@
 ;   a1.l  write pointer - where the output ends, after every call
 ;   d0.b  bit queue ($80 is the empty sentinel)
 ;   d1.l  ring size N in the high word, bytes remaining in the low word
-;   d2.l  end.low in the high word, signed last offset in the low word;
-;         the offset is negative during LITERALS, positive during MATCH;
-;         with d1.w = 0, +1 means START and 0 means DONE
+;   d2.l  end.low in the high word, signed offset/state in the low word;
+;         +lastOffset during LITERALS, -lastOffset during MATCH;
+;         with d1.w = 0, -1 means START and 0 means DONE
 ;
 ; The common state is a0/a1/d0.b/d1.w/d2.w. This general ring also keeps
 ; persistent metadata in d1.high/d2.high; only d0's upper 24 bits are caller-owned.
@@ -75,8 +75,8 @@
 ;                a2.l
 ;   untouched    d6 d7 a3 a4 a5 a6   and the stack beyond the return address
 ;
-; d4 is the gamma seed, segment length and full-pass counter; d5 is the gamma
-; value, ladder index and room arithmetic. d1.w is the result (zero = done),
+; d4 is gamma/offset scratch and the copy count; d5 is position, room and ladder
+; scratch. d1.w is the result (zero = done),
 ; while d1.high remains N. Refill d3.w before each call. Repeated DONE polls
 ; keep d1.w/d2.w zero and retain both metadata high words.
 ;
@@ -113,18 +113,11 @@ jx1_init:
         move.l  d3,d1                   ; N = end - start, packed in d1.high
         sub.l   a1,d1
         swap    d1                      ; and remaining = 0 in d1.low
-        moveq   #0,d2
+        moveq   #-1,d2
         move.w  d3,d2                   ; end.low lives above lastOffset
-        swap    d2
-        addq.w  #1,d2                   ; lastOffset = INITIAL_OFFSET
+        swap    d2                      ; -lastOffset = -INITIAL_OFFSET
         moveq   #-128,d0                ; an empty bit queue: $80 is the sentinel
         rts
-
-entry_special:                          ; d1.w = 0: only START or DONE survives a call
-        tst.w   d2                      ; START has the initial +1 offset; DONE is 0
-        bne.w   begin_literals
-entry_done:
-        rts                             ; d1.w = 0: keep returning "fully processed"
 
 ; jx1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
 ; Emits no more than the budget or destination room. d1.w = 0 means done;
@@ -145,7 +138,7 @@ have_room:
         bcc.s   budget_set
         move.w  d5,d3
 budget_set:                             ; word clamp ignores upper d3/d5 junk
-        tst.w   d1                      ; zero only survives a call for START
+        tst.w   d1                      ; zero identifies START or DONE
         beq.s   entry_special           ; START/DONE; active ops have remaining
 segment:                                ; d1.w remaining >= 1, d3 budget >= 1
         move.w  d1,d4                   ; n = min(remaining, budget)
@@ -153,19 +146,19 @@ segment:                                ; d1.w remaining >= 1, d3 budget >= 1
         bls.s   budget_fits
         move.w  d3,d4
 budget_fits:
-        tst.w   d2                      ; negative lastOffset means LITERALS
-        bmi.s   literal_source
+        tst.w   d2                      ; positive lastOffset means LITERALS
+        bpl.s   literal_source
 ; MATCH: derive the source and clamp a segment that crosses the ring end.
-        movea.l a1,a2                   ; raw source = dst - lastOffset
-        suba.w  d2,a2
+        movea.l a1,a2                   ; raw source = dst + -lastOffset
+        adda.w  d2,a2
         move.l  d1,d5
         swap    d5                      ; d5.w = N
         add.w   a1,d5
         swap    d2                      ; d2.w = end.low, temporarily
         sub.w   d2,d5                   ; d5.w = destination position
         swap    d2                      ; restore lastOffset before using it
-        sub.w   d2,d5                   ; minus offset; carry means it wrapped
-        bcc.s   copy                    ; unwrapped source cannot cross before dst
+        add.w   d2,d5                   ; add -offset; carry means unwrapped
+        bcs.s   copy                    ; unwrapped source cannot cross before dst
         neg.w   d5                      ; wrapped: room = offset - position
         cmp.w   d4,d5                   ; word, as above: the room is at most N
         bcc.s   source_wrapped
@@ -199,77 +192,10 @@ ladder:
 ladder_end:
         dbf     d4,ladder               ; full eight-byte passes
         tst.w   d2
-        bpl.s   resume_op               ; matches consume no input here;
+        bmi.s   match_copied             ; matches consume no input here
         movea.l a2,a0                   ; literals do
-
-resume_op:                              ; post-copy guards; mid-op entry skips them
         tst.w   d1
-        beq.s   transition              ; op complete: parse the next header
-resume_fresh:                           ; gamma completion proves d1.w >= 1
-        tst.w   d3
-        bne.s   segment                 ; budget remains: start/continue a segment
-
-suspend_more:                           ; Java: resume() returning true
-        rts                             ; d1.w <> 0: more output pending
-
-
-begin_literals:                         ; Java: beginLiterals()
-        neg.w   d2                      ; negative lastOffset = State.LITERALS
-        moveq   #0,d4                   ; remaining = gamma + 0; fall through
-
-; get_gamma: interlaced Elias gamma in d5.w; d4.w is the 0/1 length seed.
-; Gammas are odd-length and the stream starts with one, so the queue can empty
-; only on a continuation bit; data and transition reads need no refill check.
-; The first continuation is peeled and bcs is the loop edge.
-; Java: readInterlacedEliasGamma().
-get_gamma:
-        moveq   #1,d5
-        add.b   d0,d0                   ; first continuation bit
-        beq.s   gamma_refill            ; the queue empties on one bit in eight,
-        bcc.s   gamma_done              ; so the refill is out of line and this
-gamma_loop:                             ; branch is the one normally not taken
-        add.b   d0,d0                   ; data bit: never a refill
-        addx.w  d5,d5                   ; value = value*2 + bit
-        add.b   d0,d0                   ; continuation bit
-        beq.s   gamma_refill
-        bcs.s   gamma_loop              ; 1: another pair; the continue branch
-gamma_done:                             ; doubles as the loop jump
-        add.w   d4,d5                   ; +1 only for a new-offset match
-        move.w  d5,d1                   ; remaining = gamma + caller seed
-        bra.s   resume_fresh
-gamma_refill:                           ; queue-empty continuations share one
-        move.b  (a0)+,d0                ; refill; carry set means another pair
-        addx.b  d0,d0                   ; follows, otherwise finish the gamma
-        bcs.s   gamma_loop
-        bra.s   gamma_done
-
-transition:                             ; remaining == 0: parse the next block
-        tst.w   d2                      ; test state before the bit read
-        bmi.s   literals_transition     ; so the read can own carry
-        add.b   d0,d0                   ; Java: next(), case MATCH (bare read)
-        bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
-
-new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
-        move.b  (a0)+,d1                ; d1.w is zero; byte/word ops preserve N
-        lsr.b   #1,d1                   ; carry = low bit selects the two-byte form
-        bcs.s   two_byte
-        neg.w   d1                      ; offset = 128 - value/2
-        add.w   #128,d1
-        bra.s   got_offset
-two_byte:
-        moveq   #0,d4
-        move.b  (a0)+,d4
-        lsr.b   #1,d4                   ; d4 = high >> 1, X = high & 1
-        addx.w  d1,d1                   ; (low & 254) + (high & 1) in one go
-        lsl.w   #8,d4
-        add.w   d4,d1                   ; (high>>1)*256 + (low&254) + (high&1)
-        neg.w   d1
-        add.w   #32512,d1               ; offset = 32512 - that
-        ble.s   end_marker              ; offset <= 0 is the end marker
-got_offset:
-        move.w  d1,d2                   ; d2.w = offset; swaps access end.low above
-        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
-        bra.s   get_gamma
+        bne.s   resume_return            ; literals can stop only on the budget
 
 literals_transition:
         neg.w   d2                      ; both successors are State.MATCH
@@ -278,7 +204,73 @@ literals_transition:
         moveq   #0,d4                   ; from-last match: remaining = gamma
         bra.s   get_gamma               ; Java: beginMatchFromLastOffset()
 
+match_copied:
+        tst.w   d1
+        beq.s   match_transition
+resume_fresh:                           ; gamma or a split match may continue
+        tst.w   d3
+        bne.s   segment                 ; budget remains: start/continue a segment
+
+resume_return:                          ; return the current d1.w result
+        rts                             ; zero = DONE; nonzero = more output
+
+entry_special:                          ; d1.w = 0: only START or DONE survives a call
+        tst.w   d2                      ; START has -1; DONE is zero
+        beq.s   resume_return
+
+begin_literals:                         ; Java: beginLiterals()
+        neg.w   d2                      ; positive lastOffset = State.LITERALS
+        moveq   #0,d4                   ; remaining = gamma + 0; fall through
+
+; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
+; Gammas are odd-length and the stream starts with one, so the queue can empty
+; only on a continuation bit; data and transition reads need no refill check.
+; The first continuation is peeled and bcs is the loop edge.
+; Java: readInterlacedEliasGamma().
+get_gamma:
+        addq.w  #1,d1
+        add.b   d0,d0                   ; first continuation bit
+        beq.s   gamma_refill            ; the queue empties on one bit in eight,
+        bcc.s   gamma_done              ; so the refill is out of line and this
+gamma_loop:                             ; branch is the one normally not taken
+        add.b   d0,d0                   ; data bit: never a refill
+        addx.w  d1,d1                   ; value = value*2 + bit
+        add.b   d0,d0                   ; continuation bit
+        beq.s   gamma_refill
+        bcs.s   gamma_loop              ; 1: another pair; the continue branch
+gamma_done:                             ; doubles as the loop jump
+        add.w   d4,d1                   ; +1 only for a new-offset match
+        bra.s   resume_fresh
+gamma_refill:                           ; queue-empty continuations share one
+        move.b  (a0)+,d0                ; refill; carry set means another pair
+        addx.b  d0,d0                   ; follows, otherwise finish the gamma
+        bcs.s   gamma_loop
+        bra.s   gamma_done
+
+match_transition:                       ; remaining == 0: parse after a match
+        add.b   d0,d0                   ; Java: next(), case MATCH (bare read)
+        bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
+
+new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
+        clr.w   d2                      ; replace the old offset; keep end.low above
+        move.b  (a0)+,d2
+        lsr.b   #1,d2                   ; carry = low bit selects the two-byte form
+        bcs.s   two_byte
+        sub.w   #128,d2                 ; -offset = value/2 - 128
+        bra.s   got_offset
+two_byte:
+        moveq   #0,d4
+        move.b  (a0)+,d4
+        lsr.b   #1,d4                   ; d4 = high >> 1, X = high & 1
+        addx.w  d2,d2                   ; (low & 254) + (high & 1) in one go
+        lsl.w   #8,d4
+        add.w   d4,d2                   ; (high>>1)*256 + (low&254) + (high&1)
+        sub.w   #32512,d2               ; -offset = decoded value - 32512
+        bpl.s   end_marker              ; nonnegative is the end marker
+got_offset:
+        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+        bra.s   get_gamma
+
 end_marker:                             ; Java: State.DONE
-        clr.w   d1                      ; normalize low words for repeat polling
-        clr.w   d2                      ; metadata high words remain
+        clr.w   d2                      ; d1.w is already zero; keep metadata highs
         rts
