@@ -34,8 +34,8 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# d1.high holds N and d2.high the end address's low word. a2 is the transient
-# copy pointer; d6/d7 and a3-a6 are deliberately canaried as preserved.
+# d1.high holds -start.low and d2.high the end address's low word. a2 is the
+# transient copy pointer; d6/d7 and a3-a6 are deliberately canaried as preserved.
 CLOBBERED = (UC_M68K_REG_D4, UC_M68K_REG_D5, UC_M68K_REG_A2)
 PRESERVED = {UC_M68K_REG_D6: 0xD6D61234, UC_M68K_REG_D7: 0xFEEDFACE,
              UC_M68K_REG_A3: 0x00030234, UC_M68K_REG_A4: 0x00040234,
@@ -64,7 +64,9 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     uc.reg_write(UC_M68K_REG_D3, end)                # transient init parameter;
                                                      # resume has no bound input
     t.call(uc, ENTRY_INIT)
-    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'init did not pack N in d1.high'
+    start_meta = (-ring) & 0xFFFF
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == start_meta, \
+        'init did not pack -start.low in d1.high'
     assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
         'init did not pack end.low in d2.high'
     t.seed_d0_high(uc)
@@ -96,7 +98,8 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         else:                                   # let the decoder wrap on entry
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N in d1.high changed'
+        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == start_meta, \
+            'packed -start.low in d1.high changed'
         assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
             'packed end.low in d2.high changed'
         for reg, canary in PRESERVED.items():
@@ -106,7 +109,8 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         assert r > 0, f'bad remaining count {r}'
     assert t.call(uc, ENTRY_RESUME) == 0, 'not idempotent once done'
     t.assert_d0_high(uc)
-    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed after DONE'
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == start_meta, \
+        'packed -start.low changed after DONE'
     assert uc.reg_read(UC_M68K_REG_D2) >> 16 == (end & 0xFFFF), \
         'packed end.low changed after DONE'
     for reg, canary in PRESERVED.items():

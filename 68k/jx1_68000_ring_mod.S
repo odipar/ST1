@@ -17,7 +17,7 @@
 ; ring; the decompressor receives no ring bounds because a1's low bits give its
 ; position and the compiled RING_SIZE gives the wrap distance.
 ;
-; 200 bytes, position-independent, one body: no macros, no tables, no
+; 216 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -39,7 +39,7 @@
 ;       move.w  a1,d5
 ;       and.w   #RING_SIZE-1,d5         ; aligned ring position
 ;       bne.s   .loop
-;       suba.l  #RING_SIZE,a1           ; end -> start
+;       lea     -RING_SIZE(a1),a1       ; end -> start
 ;       bra.s   .loop
 ;   .done:
 ;
@@ -162,14 +162,22 @@ literal_source:
 copy:                                   ; Java: writeByte(...) - n moves total:
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
-        moveq   #7,d5                   ; d5 = n&7 for the partial first pass
+        moveq   #15,d5                  ; d5 = n&15 for the partial first pass
         and.w   d4,d5                   ; isolate the partial-pass count
-        lsr.w   #3,d4                   ; d4 = n>>3 full passes for the dbf
+        lsr.w   #4,d4                   ; d4 = n>>4 full passes for the dbf
         add.w   d5,d5
-        neg.w   d5                      ; index = -2*(n&7)
+        neg.w   d5                      ; index = -2*(n&15)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
-        move.b  (a2)+,(a1)+             ; 8 fully rolled-out byte moves; entry
+        move.b  (a2)+,(a1)+             ; 16 fully rolled-out byte moves; entry
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
+        move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+             ; at ladder_end-2k copies exactly k
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
@@ -178,7 +186,7 @@ ladder:
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
 ladder_end:
-        dbf     d4,ladder               ; full 8-move passes for big copies
+        dbf     d4,ladder               ; full 16-move passes for big copies
         tst.w   d2
         bmi.s   match_copied             ; matches consume no input here
         movea.l a2,a0                   ; literals do

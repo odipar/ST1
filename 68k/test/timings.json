@@ -1,5 +1,5 @@
 {
-  "fingerprint": "717d4f098a73e1fc9012b31b79244460a4ea570cfb649fba58b0a9ee2c2be8c4",
+  "fingerprint": "a918d446982e8a1fb4d0058805af7a66fa95dca6d8e8a81bbe975f6ed5bfab1c",
   "hatari": {
     "calibration": {
       "linear": {
@@ -51,46 +51,46 @@
       },
       "ring": {
         "1024/16": {
-          "allsame": 170,
-          "farmatch": 144,
-          "maxoffset": 154,
-          "period129": 178,
-          "rle32k": 159,
-          "text": 144,
-          "wordsoup": 168
+          "allsame": 161,
+          "farmatch": 137,
+          "maxoffset": 149,
+          "period129": 169,
+          "rle32k": 151,
+          "text": 137,
+          "wordsoup": 162
         }
       },
       "ring_mod": {
         "1024/16": {
-          "allsame": 163,
-          "farmatch": 139,
-          "maxoffset": 151,
-          "period129": 171,
-          "rle32k": 153,
-          "text": 140,
-          "wordsoup": 162
+          "allsame": 157,
+          "farmatch": 134,
+          "maxoffset": 145,
+          "period129": 165,
+          "rle32k": 146,
+          "text": 135,
+          "wordsoup": 160
         },
         "256/16": {
-          "allsame": 167,
-          "farmatch": 142,
-          "maxoffset": 152,
-          "period129": 178,
-          "rle32k": 156,
-          "text": 143,
-          "wordsoup": 170
+          "allsame": 160,
+          "farmatch": 136,
+          "maxoffset": 146,
+          "period129": 171,
+          "rle32k": 150,
+          "text": 138,
+          "wordsoup": 168
         }
       }
     }
   },
   "inputs": {
     "68k/jx1_68000.S": "ee62d8fbdea14a8cdb40380b1ef732ad7ddd025c36b283ba236b375a12ebb5c2",
-    "68k/jx1_68000_ring.S": "5e8f46908ed8bfb6c16769169744242d08ce2abc3ee87fa31ce9f3082269dbff",
-    "68k/jx1_68000_ring_mod.S": "42bd4831860599e5c81debd34e5eff79f58c8fbb5184497a6a5f08207ec35800",
-    "68k/test/emu/cycle_model.py": "b8929bbc816941fdd06ca58c953b699241f9129c064d1f3456498ff6eb7b648a",
+    "68k/jx1_68000_ring.S": "467cdadeeac6e530b26323dbf53ead22eea4bfe56a4b7ef19d443ffcd69e3788",
+    "68k/jx1_68000_ring_mod.S": "9bcb34448a0c16e77522426ded818a3fea5a9b4ae80e3f0bf3e19fdfd0a099be",
+    "68k/test/emu/cycle_model.py": "c1b24aa301987ed837db76227b1930a5df0918b7d6150ffcd1686889a383e998",
     "68k/test/gendata.py": "db6da30b5898677c0db6f14bb92ba52ee7f58cf6e64ceea69dede23d8c74e2d7",
     "68k/test/hatari_util.inc": "5a6ee71964e2e741f691b5c6b52d8badebac79399c6e357d485fb05de64cf405",
     "68k/test/jx1_hatari.S": "bf808c2caad995c4a186523b1828ea57b7d122501daa9ff49fc56958a036d552",
-    "68k/test/jx1_hatari_ring.S": "7bc1c5efed66f8af699c17d5416c14833c6302aa4e320ced6da36082e7629d75",
+    "68k/test/jx1_hatari_ring.S": "1d97cfda4dc9bf94d426e0e9042efaf83a5a12fa1315a1d4b7cc8441da5366eb",
     "68k/test/run.sh": "9a669e64c2faaba4c7c3090cdb63205f75257198b008a8fb4303be0d5c0a4704",
     "pom.xml": "7cc4885331b2329b5f599b43391496f3464c1b8e177f1534ad0bcd86b04f475a",
     "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
@@ -108,16 +108,16 @@
         "sha256": "c83d7646629e02ff088bb8cd3a7681feb0ddce2b30b7090c23b1661a4dab3e1a"
       },
       "ring": {
-        "bytes": 240,
-        "sha256": "918476049cf6cbcc581b09e55747155973f7a6ee0d1c9dc7079b8853a1847fd9"
+        "bytes": 248,
+        "sha256": "edb379aba7d15fc15dbad2caaf5d3c8efcbe836d15889c1d701dcdb8250466cf"
       },
       "ring_mod_1024": {
-        "bytes": 200,
-        "sha256": "4a7443ea172915302e58060c781bff6ce52fb48ec5d41ffee769a3239a4ad2b6"
+        "bytes": 216,
+        "sha256": "9978418d9261e693342e698798498db2583895f96e3eaf3793fa91bf8cb956ee"
       },
       "ring_mod_256": {
-        "bytes": 200,
-        "sha256": "a7bb91307f2b3f6367b6130688182d89072df7278fdc00bd0f71ee053da4b099"
+        "bytes": 216,
+        "sha256": "73346f393a95fc3045bd12b3834127c9ad67351873bbc0528cd6b460d3bddcf0"
       }
     },
     "cycles": {
@@ -152,42 +152,42 @@
       },
       "ring": {
         "1024/16": {
-          "allsame": 31930,
-          "farmatch": 90550,
-          "maxoffset": 958276,
-          "period129": 33376,
-          "rle32k": 996392,
-          "text": 13524,
-          "wordsoup": 209064
+          "allsame": 30414,
+          "farmatch": 86582,
+          "maxoffset": 934844,
+          "period129": 31960,
+          "rle32k": 950000,
+          "text": 12944,
+          "wordsoup": 202312
         },
         "256/16": {
-          "allsame": 32638,
-          "farmatch": 92456,
-          "maxoffset": 967836,
-          "period129": 35188,
-          "rle32k": 1018340,
-          "text": 13852,
-          "wordsoup": 219720
+          "allsame": 31278,
+          "farmatch": 88956,
+          "maxoffset": 949264,
+          "period129": 34216,
+          "rle32k": 976784,
+          "text": 13348,
+          "wordsoup": 214744
         }
       },
       "ring_mod": {
         "1024/16": {
-          "allsame": 30922,
-          "farmatch": 87890,
-          "maxoffset": 948540,
-          "period129": 32398,
-          "rle32k": 963648,
-          "text": 13132,
-          "wordsoup": 201092
+          "allsame": 29646,
+          "farmatch": 84246,
+          "maxoffset": 907456,
+          "period129": 31084,
+          "rle32k": 923632,
+          "text": 12674,
+          "wordsoup": 198148
         },
         "256/16": {
-          "allsame": 31558,
-          "farmatch": 89604,
-          "maxoffset": 957866,
-          "period129": 33610,
-          "rle32k": 983382,
-          "text": 13392,
-          "wordsoup": 210430
+          "allsame": 30282,
+          "farmatch": 85958,
+          "maxoffset": 916614,
+          "period129": 32296,
+          "rle32k": 943348,
+          "text": 12934,
+          "wordsoup": 207816
         }
       }
     },
