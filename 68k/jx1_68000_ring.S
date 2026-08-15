@@ -8,21 +8,17 @@
 ; commercially, as long as your documentation indicates that you used
 ; ZX1/jx1 (see LICENSE).
 ;
-; Decompresses a jx1/ZX1 stream through a ring buffer you supply, so the
-; memory it needs is bounded by the buffer and not by the size of the output:
-; 32 KB of output can pass through 256 bytes of RAM. A buffer of N bytes can
-; only serve back-references up to N, so compress the stream with -mN.
+; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
+; N and every back-reference must fit it; for N below 32512, compress with -mN.
 ;
 ; 266 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
 ; -----------------------------------------------------------------------------
-; DRAINING. Each call emits at most the budget you give it, and at most as
-; much as fits before the end of the buffer, so the write pointer never wraps
-; during a call: a full buffer simply shows up as a1 reaching the end bound.
-; You consume what the call produced and carry on - there is no callback to
-; write, and no third return code to handle:
+; DRAINING. A call emits at most its budget and the room before the ring end;
+; a1 therefore never wraps within a call. Consume [old a1 .. new a1), wrap a1
+; after it reaches the end, then resume:
 ;
 ;       lea     stream,a0
 ;       lea     ring,a1                 ; N bytes, any alignment
@@ -42,35 +38,21 @@
 ;       tst.w   d1
 ;       bne.s   .loop
 ;
-; jx1_68000_ring_mod.S is a smaller, faster version of this file when N is a
-; compile-time power of two, the buffer base is aligned to N, and one fixed
-; budget X divides N.
+; jx1_68000_ring_mod.S applies when N is a compile-time power of two, the base
+; is aligned to N, and one fixed budget X divides N.
 ;
 ; -----------------------------------------------------------------------------
-; HOW THE RING COSTS SO LITTLE. Two choices do the work.
-;
-; THE BUDGET CARRIES THE RING. The entry clamps this call's budget to the room
-; left in the buffer, so the destination cannot reach the end inside a call -
-; only exactly as the budget runs out. No copy needs a destination bounds
-; test, and the buffer is wrapped once, at the next entry, where the room is
-; being computed anyway.
-;
-; A MATCH SOURCE THAT WOULD RUN OFF THE END SPLITS THE COPY instead of testing
-; each byte, so the rolled-out copy ladder needs no bounds test either. The
-; source is recomputed from the destination position and the offset for each
-; segment rather than carried. N in d1.high and end.low in d2.high are enough
-; to identify a wrap without a bound register; a wrapped raw source comes back
-; into the ring by adding N. The low-word identity position = N + destination
-; - end works across 64 KB boundaries, and the following unsigned offset
-; subtraction supplies the wrap decision for every N up to 65535.
-;
-; What is left of the ring is one clamp per call and at most one clamp per
-; match segment: work per CALL and per MATCH, never per byte.
+; RING BOUNDS. Entry clamps the budget to the destination room, so a1 reaches
+; the end only as the call's budget expires; the next entry wraps it. A match
+; source crossing the end splits the copy, and is recomputed for each segment.
+; N in d1.high and end.low in d2.high replace bound registers. The low-word
+; identity position = N + destination - end is exact across 64-K boundaries;
+; carry from unsigned position-offset detects a wrapped source, restored by
+; adding N. Bounds work is per call and per match segment, never per byte.
 ;
 ; -----------------------------------------------------------------------------
-; THE STATE IS YOUR REGISTERS. There is no context block to allocate, align or
-; keep alive; jx1_init seeds three registers and a resume loop leaves all five
-; alone between calls:
+; THE STATE IS YOUR REGISTERS. jx1_init seeds it; preserve all five between
+; calls except for the documented a1 ring wrap:
 ;
 ;   a0.l  input position
 ;   a1.l  write pointer - where the output ends, after every call
@@ -80,9 +62,8 @@
 ;         the offset is negative during LITERALS, positive during MATCH;
 ;         with d1.w = 0, +1 means START and 0 means DONE
 ;
-; The common state layout is a0/a1/d0.b/d1.w/d2.w, exactly as in the other
-; decoders. This general ring also uses d1.high and d2.high as persistent ring
-; metadata; only the upper 24 bits of d0 remain the caller's after init.
+; The common state is a0/a1/d0.b/d1.w/d2.w. This general ring also keeps
+; persistent metadata in d1.high/d2.high; only d0's upper 24 bits are caller-owned.
 ;
 ; Calling convention, in full:
 ;
@@ -94,55 +75,40 @@
 ;                a2.l
 ;   untouched    d6 d7 a3 a4 a5 a6   and the stack beyond the return address
 ;
-; d4 and d5 are working registers throughout - d4 carries the gamma seed,
-; segment length and full-pass counter, while d5 carries the gamma value,
-; copy-ladder index and room arithmetic - so treat both as gone across a call.
-; d1.w itself is the result: zero means done, nonzero means more; d1 as a whole
-; is never zero because its high word is N.
-; Only d3's low word is spent, but it is spent, not refilled: pass the budget
-; again on the next call.
-;
-; A finished stream keeps leaving d1.w = 0 however often you poll it; d2.w is
-; also zero, while both high words retain the packed ring metadata.
+; d4 is the gamma seed, segment length and full-pass counter; d5 is the gamma
+; value, ladder index and room arithmetic. d1.w is the result (zero = done),
+; while d1.high remains N. Refill d3.w before each call. Repeated DONE polls
+; keep d1.w/d2.w zero and retain both metadata high words.
 ;
 ; -----------------------------------------------------------------------------
-; ASSUMPTIONS. Undefined behaviour when violated, because nothing checks them:
+; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
 ;
 ;   1. no single literal run or match is longer than 65535 bytes - an
-;      operation's length lives in a word. Compress with jx1 -l65535, which
-;      splits any longer match; a stream compressed without it can exceed the
-;      limit, and would decode short here with no error
+;      operation length is a word; compress with jx1 -l65535
 ;   2. the budget in d3.w is 1..65535
 ;   3. the ring buffer size N is 1..65535. The format's offsets stop at 32512,
 ;      so a larger ring could never be referenced anyway
-;   4. no back-reference offset exceeds N, which is what compressing with
-;      -mN guarantees
+;   4. no back-reference offset exceeds N. For N below 32512, compress with
+;      -mN; rings of at least 32512 bytes cover the format's full offset range
 ;   5. at jx1_init, a1 is the first ring byte and d3 is one past the last;
-;      their difference is N. After init, keep all five state registers in
-;      full - including the packed high words - intact between resume calls
+;      their difference is N. Preserve the state after init except for the
+;      documented a1 wrap; always preserve the packed high words
 ;
-; TRUSTED INPUT ONLY. Nothing here is validated: not the stream, not the end
-; of the input, not the destination, not the parameters. A malformed or
-; hostile stream can read and write arbitrary memory, an offset reaching back
-; further than the output produced so far reads whatever is there, and a
-; budget of zero never advances an operation, so a caller's drain loop spins
-; forever. That is the deliberate price of a decompressor this size. For data
-; you did not produce yourself, validate the stream and its decompressed
-; length before calling in, or decompress it somewhere it cannot do harm.
+; TRUSTED INPUT ONLY. Stream, bounds, destination and parameters are not
+; validated. Malformed data can read or write arbitrary memory; an offset can
+; read unwritten ring data, and a zero budget makes no progress. Validate
+; untrusted streams and decompressed lengths first, or decode them in an
+; isolated memory region.
 ; -----------------------------------------------------------------------------
 
-; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
-; There is no one-shot entry: a bounded buffer has to be drained by the
-; caller, so every stream is decompressed through the resume loop.
+; Jump table: bra.w keeps 4-byte slots (base+0/4). A bounded ring has no
+; one-shot entry; the caller drains it through jx1_resume.
                 bra.w   jx1_init
                 bra.w   jx1_resume
 
-; -----------------------------------------------------------------------------
 ; jx1_init: a0 = compressed data, a1 = first ring byte, d3 = one-past-end.
-; Java: the Decompressor constructor / reset(). Seeds d0/d1/d2, deriving N
-; from d3-a1. N and end.low are packed above the word-sized common state;
-; writes nothing to memory.
-; -----------------------------------------------------------------------------
+; Derives N = d3-a1 and packs N/end.low above the common state; writes no memory.
+; Java: the Decompressor constructor / reset().
 jx1_init:
         move.l  d3,d1                   ; N = end - start, packed in d1.high
         sub.l   a1,d1
@@ -160,39 +126,27 @@ entry_special:                          ; d1.w = 0: only START or DONE survives 
 entry_done:
         rts                             ; d1.w = 0: keep returning "fully processed"
 
-; -----------------------------------------------------------------------------
 ; jx1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
-; Emits at most d3 bytes, and at most as many as fit before the end of the
-; buffer. Returns d1.w = 0 when the stream is fully processed, nonzero when
-; there is more. a1 is the caller's cue: everything between its previous value
-; and its new one is fresh output, and a1 reaching the known end means full.
-; Hand a1 straight back either way: this entry subtracts N to wrap a full
-; buffer itself, at the start of the next call.
+; Emits no more than the budget or destination room. d1.w = 0 means done;
+; [old a1 .. new a1) is fresh output. After draining at the end, either wrap
+; a1 explicitly or let the next entry wrap it.
 ; Java: Decompressor.resume().
-; -----------------------------------------------------------------------------
 jx1_resume:
         move.l  d2,d5
         swap    d5                      ; room = end.low - destination.low
         sub.w   a1,d5                   ; exact because the room is <= 65535
         bne.s   have_room
-        move.l  d1,d5                   ; the buffer was filled by the previous
-        clr.w   d5                      ; call and the caller has drained it:
-        swap    d5                      ; zero-extend N from d1.high, subtract
-        suba.l  d5,a1                   ; it to wrap, and leave room = N
+        move.l  d1,d5                   ; previous call filled the drained ring
+        clr.w   d5
+        swap    d5                      ; zero-extend N
+        suba.l  d5,a1                   ; wrap a1; leave room = N
 have_room:
-        cmp.w   d3,d5                   ; budget = min(budget, room), so the
-        bcc.s   budget_set              ; destination cannot reach the end of
-        move.w  d5,d3                   ; the buffer inside this call - only
-budget_set:                             ; exactly as the budget runs out. Word:
-                                        ; the room is at most N <= 65535, so
-                                        ; this cannot read the caller's junk in
-                                        ; the upper words of d5 or d3
+        cmp.w   d3,d5                   ; budget = min(budget, room)
+        bcc.s   budget_set
+        move.w  d5,d3
+budget_set:                             ; word clamp ignores upper d3/d5 junk
         tst.w   d1                      ; zero only survives a call for START
-        beq.s   entry_special           ; or DONE; an active op has bytes left;
-                                        ; a mid-op resume falls straight into
-                                        ; the segment body, because a suspend
-                                        ; only ever happens with remaining >= 1
-                                        ; and the budget was just refilled
+        beq.s   entry_special           ; START/DONE; active ops have remaining
 segment:                                ; d1.w remaining >= 1, d3 budget >= 1
         move.w  d1,d4                   ; n = min(remaining, budget)
         cmp.w   d3,d4
@@ -201,13 +155,7 @@ segment:                                ; d1.w remaining >= 1, d3 budget >= 1
 budget_fits:
         tst.w   d2                      ; negative lastOffset means LITERALS
         bmi.s   literal_source
-
-
-; -----------------------------------------------------------------------------
-; resume_op: the segment loop, shared by literals and matches (sign of d2).
-; Only a match source running into the end of the buffer can split a copy;
-; the destination never can, so literals always copy in one pass.
-; -----------------------------------------------------------------------------
+; MATCH: derive the source and clamp a segment that crosses the ring end.
         movea.l a1,a2                   ; raw source = dst - lastOffset
         suba.w  d2,a2
         move.l  d1,d5
@@ -217,15 +165,14 @@ budget_fits:
         sub.w   d2,d5                   ; d5.w = destination position
         swap    d2                      ; restore lastOffset before using it
         sub.w   d2,d5                   ; minus offset; carry means it wrapped
-        bcc.s   copy                    ; unwrapped source is behind dst, so it
-                                        ; cannot reach the end before dst does
+        bcc.s   copy                    ; unwrapped source cannot cross before dst
         neg.w   d5                      ; wrapped: room = offset - position
         cmp.w   d4,d5                   ; word, as above: the room is at most N
         bcc.s   source_wrapped
         move.w  d5,d4                   ; this segment stops at the wrap
 source_wrapped:
-        move.l  d1,d5                   ; raw source + zero-extended N brings it
-        clr.w   d5                      ; back into the ring at any 32-bit address
+        move.l  d1,d5                   ; add zero-extended N at any 32-bit address
+        clr.w   d5
         swap    d5
         adda.l  d5,a2
         bra.s   copy
@@ -234,15 +181,15 @@ literal_source:
 copy:                                   ; Java: writeByte(...) - n moves total:
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
-        moveq   #7,d5                   ; d5 = n&7 for the partial first pass;
-        and.w   d4,d5                   ; register AND is cheaper than ANDI
-        lsr.w   #3,d4                   ; d4 = n>>3 full passes for the dbf
+        moveq   #7,d5                   ; d5 = n&7, partial-pass dispatch
+        and.w   d4,d5
+        lsr.w   #3,d4                   ; d4 = n>>3 full passes
         add.w   d5,d5
         neg.w   d5                      ; index = -2*(n&7)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
-        move.b  (a2)+,(a1)+             ; 8 fully rolled-out byte moves; entry
-        move.b  (a2)+,(a1)+             ; at ladder_end-2k copies exactly k
+        move.b  (a2)+,(a1)+             ; entry at ladder_end-2k copies k bytes
+        move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
@@ -250,41 +197,30 @@ ladder:
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
 ladder_end:
-        dbf     d4,ladder               ; full 8-move passes for big copies
+        dbf     d4,ladder               ; full eight-byte passes
         tst.w   d2
         bpl.s   resume_op               ; matches consume no input here;
         movea.l a2,a0                   ; literals do
 
-resume_op:                              ; the loop guards live here, below the
-        tst.w   d1                      ; copy, so a call entering mid-op skips
-        beq.s   transition              ; them: op complete, parse the next one
+resume_op:                              ; post-copy guards; mid-op entry skips them
+        tst.w   d1
+        beq.s   transition              ; op complete: parse the next header
 resume_fresh:                           ; gamma completion proves d1.w >= 1
         tst.w   d3
-        bne.s   segment                 ; budget left: the source wrapped, so
-                                        ; take another segment of the same op.
-                                        ; Spent is the common case, so it is the
-                                        ; one that costs nothing to reach
+        bne.s   segment                 ; budget remains: start/continue a segment
 
 suspend_more:                           ; Java: resume() returning true
-        rts                             ; d1.w <> 0: more output pending. The state
-                                        ; is already where it lives - in
-                                        ; the caller's registers
+        rts                             ; d1.w <> 0: more output pending
 
 
 begin_literals:                         ; Java: beginLiterals()
         neg.w   d2                      ; negative lastOffset = State.LITERALS
         moveq   #0,d4                   ; remaining = gamma + 0; fall through
 
-; get_gamma: interlaced Elias gamma value in d5.w (assumption: fits a word),
-; entered with d4.w = 0 normally or 1 for a new-offset match. Its shared tail
-; installs remaining and skips resume_op's now-proven d1.w test.
-; Holds the decompressor's only bit-queue refills: gammas are odd-length,
-; transitions are single bits, and the stream opens with a gamma, so
-; continuation bits sit at even bit indices and the queue (refilled every
-; 8th bit) can only empty on one - data and transition bits are read bare,
-; with no refill check. The first continuation bit is peeled (a length-1
-; value falls straight through) and the loop is rotated so the continue
-; branch is the back-jump: no unconditional bra per pair.
+; get_gamma: interlaced Elias gamma in d5.w; d4.w is the 0/1 length seed.
+; Gammas are odd-length and the stream starts with one, so the queue can empty
+; only on a continuation bit; data and transition reads need no refill check.
+; The first continuation is peeled and bcs is the loop edge.
 ; Java: readInterlacedEliasGamma().
 get_gamma:
         moveq   #1,d5
@@ -308,15 +244,13 @@ gamma_refill:                           ; queue-empty continuations share one
         bra.s   gamma_done
 
 transition:                             ; remaining == 0: parse the next block
-        tst.w   d2                      ; header. State test BEFORE the bit
-        bmi.s   literals_transition     ; read: it must not clobber the carry
+        tst.w   d2                      ; test state before the bit read
+        bmi.s   literals_transition     ; so the read can own carry
         add.b   d0,d0                   ; Java: next(), case MATCH (bare read)
         bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
-        move.b  (a0)+,d1                ; d1.w is already zero: every edge here
-                                        ; has just completed an op. Byte/word
-                                        ; operations preserve N in d1.high
+        move.b  (a0)+,d1                ; d1.w is zero; byte/word ops preserve N
         lsr.b   #1,d1                   ; carry = low bit selects the two-byte form
         bcs.s   two_byte
         neg.w   d1                      ; offset = 128 - value/2
@@ -333,24 +267,18 @@ two_byte:
         add.w   #32512,d1               ; offset = 32512 - that
         ble.s   end_marker              ; offset <= 0 is the end marker
 got_offset:
-        move.w  d1,d2                   ; the new lastOffset stays directly in
-                                        ; d2.w; the match-path swaps reach only
-                                        ; the packed end.low above it
+        move.w  d1,d2                   ; d2.w = offset; swaps access end.low above
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma
 
 literals_transition:
-        neg.w   d2                      ; positive lastOffset = State.MATCH;
-                                        ; both successors of a literal run are
-                                        ; matches, so flip it before the bare
-                                        ; bit read below
+        neg.w   d2                      ; both successors are State.MATCH
         add.b   d0,d0                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
         moveq   #0,d4                   ; from-last match: remaining = gamma
         bra.s   get_gamma               ; Java: beginMatchFromLastOffset()
 
-end_marker:                             ; Java: State.DONE; the decoded marker
-        clr.w   d1                      ; remains in d1, so normalize DONE as
-        clr.w   d2                      ; low d1/d2 = 0 for repeat polling. Output
-                                        ; ends in a1; both high words remain
+end_marker:                             ; Java: State.DONE
+        clr.w   d1                      ; normalize low words for repeat polling
+        clr.w   d2                      ; metadata high words remain
         rts
