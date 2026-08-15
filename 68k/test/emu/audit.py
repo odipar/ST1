@@ -170,6 +170,51 @@ for f, body in zip(FILES, (linear_body, ring_body, mod_body)):
     check(not re.search(r'^\s+.*\ba[3-6]\b', body, re.M),
           f'{f}: a3-a6 are untouched')
 
+# Gamma decoding is woven into the operation parser rather than called as a
+# subroutine, and the copy ladder deliberately gives d5 the remainder/dispatch
+# index while d4 carries the full-pass count. Pin the complete instruction
+# shapes: a partial remap can still assemble and silently copy the wrong count.
+def instruction_text(src):
+    return '\n'.join(re.sub(r'\s+', ' ', code)
+                     for line in src.splitlines()
+                     if (code := line.split(';', 1)[0].strip()))
+
+
+ladder_remap = re.compile(
+    r'moveq\s+#7,d5\n'
+    r'and\.w\s+d4,d5\n'
+    r'lsr\.w\s+#3,d4\n'
+    r'add\.w\s+d5,d5\n'
+    r'neg\.w\s+d5\n'
+    r'jmp\s+ladder_end\(pc,d5\.w\)')
+woven_tail = re.compile(r'gamma_done:\nadd\.w\s+d4,d5\nmove\.w\s+d5,d1')
+literal_gamma_fallthrough = re.compile(
+    r'begin_literals:\n'
+    r'neg\.w\s+d2\n'
+    r'moveq\s+#0,d4\n'
+    r'get_gamma:')
+for f in FILES:
+    code = instruction_text((K68 / f).read_text())
+    check(not re.search(r'\bbsr(?:\.[a-z])?\s+get_gamma\b', code),
+          f'{f}: gamma decoder is woven in, with no BSR get_gamma')
+    check(bool(woven_tail.search(code)),
+          f'{f}: gamma tail adds the d4 seed and installs d1.w')
+    check(bool(literal_gamma_fallthrough.search(code)),
+          f'{f}: literal entry falls directly into get_gamma')
+    check(len(ladder_remap.findall(code)) == 1 and
+          code.count('dbf d4,ladder') == 1 and
+          'jmp ladder_end(pc,d4.w)' not in code and
+          'dbf d5,ladder' not in code,
+          f'{f}: ladder uses d5 dispatch and d4 DBF exactly once')
+    check('and.w #7,d4' not in code,
+          f'{f}: ladder has no old immediate mask into d4')
+
+for f in FILES[1:]:
+    code = instruction_text((K68 / f).read_text())
+    gamma_tail = code[code.index('gamma_done:'):code.index('gamma_refill:')]
+    check('resume_fresh:' in code and 'bra.s resume_fresh' in gamma_tail,
+          f'{f}: woven gamma tail routes through resume_fresh')
+
 # Linear and ring_mod expose only d1.w/d2.w. Their caller-owned upper halves
 # must never become accidental scratch on resume. The general ring deliberately
 # uses both highs for N and end.low, so it is excluded from this width check.

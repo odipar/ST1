@@ -281,27 +281,35 @@ exactly 4 cycles off each suspension, and 2 cycles off DONE:
 
 ### Current compact register ABIs
 
-The latest pass slides the common last-offset state from `d3.w` to `d2.w`,
+The register pass slides the common last-offset state from `d3.w` to `d2.w`,
 the budget from `d4.w` to `d3.w`, and the two data temporaries to `d4`/`d5`.
-All three decoders now touch exactly `a0`–`a2` and `d0`–`d5`: `a2` is the
-copy source, `d0`–`d2` are state, and `d3`–`d5` are spent budget/scratch. The
+All three decoders touch exactly `a0`–`a2` and `d0`–`d5`: `a2` is the copy
+source, `d0`–`d2` are state, and `d3`–`d5` are spent budget/scratch. The
 general ring eliminates its last bound register by packing N into `d1.high`
 and `end.low` into `d2.high` at init.
+
+The current pass keeps that ABI and improves both shared hot paths. Gamma
+decoding is woven into the parser: its callers seed `d4.w` with zero or one,
+and one tail installs `gamma + seed` without a `bsr`/`rts` pair. The copy
+ladder now keeps `n>>3` in `d4` and forms `n&7` in `d5` with a register AND,
+saving four cycles per copied segment and two bytes from each decoder.
+Together these changes take the linear/general-ring/`ring_mod` bodies from
+232/274/232 bytes to **220/266/224 bytes**.
 
 The complete `run.sh` pass measures those ABIs below. Values are raw
 200 Hz ticks in corpus order
 `text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`; every correctness
 shape in the same executables also passed.
 
-| decoder | N/X | ST ticks |
-|---|---|---|
-| linear | —/16 | 131/154/127/157/148/137/143 |
-| general ring | 1024/16 | 150/192/146/181/172/160/160 |
-| `ring_mod` | 256/16 | 148/191/144/181/169/157/158 |
-| `ring_mod` | 1024/16 | 145/187/141/174/165/154/157 |
+| decoder | code | N/X | ST ticks |
+|---|---:|---|---|
+| linear | 220 B | —/16 | 128/146/126/155/146/136/141 |
+| general ring | 266 B | 1024/16 | 147/182/145/179/170/159/158 |
+| `ring_mod` | 224 B | 256/16 | 145/181/143/179/167/156/155 |
+| `ring_mod` | 224 B | 1024/16 | 143/177/140/172/164/153/155 |
 
 At the directly comparable 1024/16 shape, the fixed decoder remains faster
-on every corpus, by **1.9% to 4.1%**. Neither decoder has a persistent bound
+on every corpus, by **1.9% to 3.9%**. Neither decoder has a persistent bound
 register, and both leave `d6`/`d7` and `a3`–`a6` untouched.
 
 **For the modeled stages, the model holds.** Real ST decode time runs **+2.7%

@@ -20,7 +20,7 @@ python3 68k/test/emu/align_ring2.py jx1_68000_ring_mod.bin
 python3 68k/test/emu/poison.py jx1_68000.bin linear
 python3 68k/test/emu/poison.py jx1_68000_ring.bin
 python3 68k/test/emu/poison.py jx1_68000_ring_mod.bin
-python3 68k/test/emu/audit.py                 # 129 doc-vs-code claims
+python3 68k/test/emu/audit.py                 # 146 doc-vs-code claims
 python3 68k/test/emu/compat.py                # jx1 vs the original C zx1
 ```
 

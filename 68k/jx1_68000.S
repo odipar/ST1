@@ -18,7 +18,7 @@
 ; match window and must hold everything decompressed so far. Use
 ; jx1_68000_ring.S to decompress into memory bounded by a ring buffer instead.
 ;
-; 232 bytes, position-independent, one body: no macros, no tables, no
+; 220 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -46,9 +46,10 @@
 ;                a2.l
 ;   untouched    d6 d7 a3 a4 a5 a6   and the stack beyond the return address
 ;
-; d4 and d5 are working registers throughout - d4 carries the segment length
-; and the copy-ladder index, d5 the gamma value - so treat both as gone across
-; a call. d1 itself is the result: zero means done, nonzero means more.
+; d4 and d5 are working registers throughout - d4 carries the gamma seed,
+; segment length and full-pass counter, while d5 carries the gamma value and
+; copy-ladder dispatch index - so treat both as gone across a call. d1 itself
+; is the result: zero means done, nonzero means more.
 ; Only d3's low word is spent, but it is spent, not refilled: pass the budget
 ; again on the next call.
 ;
@@ -128,7 +129,9 @@ jx1_resume:
                                         ; loop guard below the copy can be
                                         ; skipped on the way in
 
-; get_gamma: interlaced Elias gamma value in d5.w (assumption: fits a word).
+; get_gamma: interlaced Elias gamma value in d5.w (assumption: fits a word),
+; entered with d4.w = 0 normally or 1 for a new-offset match. Its shared tail
+; adds that seed, installs remaining and falls straight into resume_op.
 ; Holds the decompressor's only bit-queue refills: gammas are odd-length,
 ; transitions are single bits, and the stream opens with a gamma, so
 ; continuation bits sit at even bit indices and the queue (refilled every
@@ -137,6 +140,15 @@ jx1_resume:
 ; value falls straight through) and the loop is rotated so the continue
 ; branch is the back-jump: no unconditional bra per pair.
 ; Java: readInterlacedEliasGamma().
+gamma_refill:                           ; queue-empty continuations share one
+        move.b  (a0)+,d0                ; refill; carry set means another pair
+        addx.b  d0,d0                   ; follows, otherwise finish the gamma
+        bcs.s   gamma_loop
+        bra.s   gamma_done
+
+begin_literals:                         ; Java: beginLiterals()
+        neg.w   d2                      ; negative lastOffset = State.LITERALS
+        moveq   #0,d4                   ; remaining = gamma + 0; fall through
 get_gamma:
         moveq   #1,d5
         add.b   d0,d0                   ; first continuation bit
@@ -149,17 +161,8 @@ gamma_loop:                             ; branch is the one normally not taken
         beq.s   gamma_refill
         bcs.s   gamma_loop              ; 1: another pair; the continue branch
 gamma_done:                             ; doubles as the loop jump
-        rts
-gamma_refill:                           ; both sites want the same thing of a
-        move.b  (a0)+,d0                ; refilled queue - carry set means
-        addx.b  d0,d0                   ; another pair follows - so they share
-        bcs.s   gamma_loop              ; one block, and duplicating this tail
-        rts                             ; costs nothing over branching back
-
-begin_literals:                         ; Java: beginLiterals()
-        neg.w   d2                      ; negative lastOffset = State.LITERALS
-        bsr.s   get_gamma
-        move.w  d5,d1                   ; remaining = gamma; lastOffset untouched
+        add.w   d4,d5                   ; +1 only for a new-offset match
+        move.w  d5,d1                   ; remaining = gamma + caller seed
 
 resume_op:                              ; reached after parsing an op, when the
         tst.w   d3                      ; budget may already be spent; a call
@@ -180,12 +183,12 @@ budget_fits:
         suba.w  d2,a2                   ; (Java: readBufferByte(); the destination
                                         ; is the window, so no ring arithmetic)
 source_ready:                           ; Java: writeByte(...) - n moves total:
-        move.w  d4,d5                   ; a partial first pass of n&7 entered
-        lsr.w   #3,d5                   ; mid-ladder, then n>>3 full passes off
-        and.w   #7,d4                   ; the dbf at ladder_end
-        add.w   d4,d4
-        neg.w   d4                      ; index = -2*(n&7)
-        jmp     ladder_end(pc,d4.w)     ; pc-relative dispatch, no base register
+        moveq   #7,d5                   ; d5 = n&7 for the partial first pass;
+        and.w   d4,d5                   ; register AND is cheaper than ANDI
+        lsr.w   #3,d4                   ; d4 = n>>3 full passes for the dbf
+        add.w   d5,d5
+        neg.w   d5                      ; index = -2*(n&7)
+        jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
         move.b  (a2)+,(a1)+             ; 8 fully rolled-out byte moves; entry
         move.b  (a2)+,(a1)+             ; at ladder_end-2k copies exactly k
@@ -196,7 +199,7 @@ ladder:
         move.b  (a2)+,(a1)+
         move.b  (a2)+,(a1)+
 ladder_end:
-        dbf     d5,ladder               ; full 8-move passes for big copies
+        dbf     d4,ladder               ; full 8-move passes for big copies
 copy_done:
         tst.w   d2
         bpl.s   copied                  ; matches consume no input here;
@@ -232,12 +235,8 @@ got_offset:
         move.w  d1,d2                   ; the new lastOffset. Same four cycles a
                                         ; swap cost, and now the match source
                                         ; needs no swaps at all
-        bsr.w   get_gamma               ; (.w: out of short range; BSR is 18
-                                        ; cycles at either width)
-        addq.w  #1,d5                   ; remaining = gamma + 1
-        move.w  d5,d1
-        bra.w   resume_op               ; (.w: out of short range; BRA taken
-                                        ; costs 10 cycles at either width)
+        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+        bra.w   get_gamma               ; taken BRA costs 10 cycles at either width
 
 literals_transition:
         neg.w   d2                      ; positive lastOffset = State.MATCH;
@@ -246,9 +245,8 @@ literals_transition:
                                         ; bit read below
         add.b   d0,d0                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
-        bsr.w   get_gamma               ; Java: beginMatchFromLastOffset() (.w: same)
-        move.w  d5,d1                   ; remaining = gamma; lastOffset untouched
-        bra.w   resume_op               ; (.w: same, zero cycle cost)
+        moveq   #0,d4                   ; from-last match: remaining = gamma
+        bra.w   get_gamma               ; Java: beginMatchFromLastOffset()
 
 suspend:                                ; Java: resume() returning true
         rts                             ; d1 <> 0: more output pending. The state
