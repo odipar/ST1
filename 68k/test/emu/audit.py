@@ -8,11 +8,10 @@ ok, bad = [], []
 def check(cond, msg):
     (ok if cond else bad).append(msg)
 
-FILES = ['jx1_68000.S', 'jx1_68000_ring.S', 'jx1_68000_ring_mod.S']
+FILES = ['jx1_68000.S', 'jx1_68000_ring.S']
 sizes = {}
 for f in FILES:
-    defines = ['-dRING_SIZE=1024'] if f == 'jx1_68000_ring_mod.S' else []
-    out = subprocess.run(ASM + defines + ['-o', '/tmp/a.bin', str(K68 / f)],
+    out = subprocess.run(ASM + ['-o', '/tmp/a.bin', str(K68 / f)],
                          capture_output=True, text=True)
     check(out.returncode == 0, f'{f} assembles')
     sizes[f] = Path('/tmp/a.bin').stat().st_size
@@ -91,40 +90,24 @@ for f in FILES + ['test/jx1_hatari.S', 'test/jx1_hatari_ring.S']:
     check('15 byte' not in src and '15-byte' not in src, f'{f}: no 15-byte wording')
 check('15-byte' not in readme, 'README: no 15-byte wording')
 
-# 7. the ST harness only uses shapes the decoders support. The two builds have
-#    different contracts, so the two tables are checked against different rules.
+# 7. the ST ring harness covers both dividing and non-dividing legal shapes.
 harness = (K68 / 'test' / 'jx1_hatari_ring.S').read_text()
 named = dict(re.findall(r'^(RING_\w+)\s+equ\s+(\d+)', harness, re.M))
 
 
 def parse_shapes(text):
-    values = {**named, 'RING_SIZE': '1024'}      # representative fixed build
+    values = named
     return [(int(values.get(a, a)), int(b))
             for a, b in re.findall(r'dc\.l\s+(\w+),(\d+)', text)]
 
 
-mod_shapes, gen_shapes = [], []
-for m in re.finditer(r'\.if\s+RINGMOD(.*?)\.else(.*?)\.endif', harness, re.S):
-    if 'shapes:' in m.group(1) and 'shapes:' in m.group(2):
-        mod_shapes, gen_shapes = parse_shapes(m.group(1)), parse_shapes(m.group(2))
-        break
-check(bool(mod_shapes) and bool(gen_shapes),
-      f'ST harness declares both shape tables ({len(mod_shapes)}/{len(gen_shapes)})')
-check(all(n and not n & (n - 1) and n % x == 0 for n, x in mod_shapes),
-      f'every ring_mod shape is power-of-two/dividing: {mod_shapes}')
-mod_builds = [int(n) for n in re.findall(r'-dRING_SIZE=(\d+)',
-                                         (K68 / 'test' / 'run.sh').read_text())]
-check(len(set(mod_builds)) >= 2 and
-      all(1 <= n <= 32768 and not n & (n - 1) for n in mod_builds),
-      f'run.sh assembles multiple valid ring_mod variants ({mod_builds})')
-mod_budgets = [x for _, x in mod_shapes]
-check(all(x and n % x == 0 for n in mod_builds for x in mod_budgets),
-      f'every run.sh ring_mod build supports every harness budget '
-      f'(N={mod_builds}, X={mod_budgets})')
+shape_block = harness[harness.index('shapes:'):harness.index('m_calib:')]
+gen_shapes = parse_shapes(shape_block)
+check(bool(gen_shapes), f'ST harness declares general-ring shapes ({gen_shapes})')
 check(any(n % x for n, x in gen_shapes),
       'the general-ring table exercises at least one non-dividing shape')
-check(all(n <= 65535 for n, _ in mod_shapes + gen_shapes),
-      f'ST shapes within N <= 65535: {mod_shapes + gen_shapes}')
+check(all(1 <= n <= 65535 and 1 <= x <= 65535 for n, x in gen_shapes),
+      f'ST shapes stay within the general-ring contract: {gen_shapes}')
 
 # 8. run.sh fails on BAD, and quotes the right sizes
 runsh = (K68 / 'test' / 'run.sh').read_text()
@@ -145,9 +128,6 @@ for f in FILES:
 corpora = len(re.findall(r"^\s+\('", (K68 / 'test' / 'gendata.py').read_text(), re.M))
 claim = f'{corpora} corpora × {len(gen_shapes)} ring/chunk shapes'
 check(claim in test_readme, f'test README states the general-ring count ({claim})')
-mod_total = corpora * len(mod_shapes) * len(set(mod_builds))
-check(f'{mod_total} configurations' in test_readme,
-      f'test README states the ring_mod count ({mod_total} configurations)')
 
 # 12. every size and context size quoted in prose, against the assembled files
 for f in FILES:
@@ -174,9 +154,7 @@ linear_body = '\n'.join(l for l in (K68 / FILES[0]).read_text().splitlines()
                         if not l.lstrip().startswith(';'))
 ring_body = '\n'.join(l for l in (K68 / FILES[1]).read_text().splitlines()
                       if not l.lstrip().startswith(';'))
-mod_body = '\n'.join(l for l in (K68 / FILES[2]).read_text().splitlines()
-                     if not l.lstrip().startswith(';'))
-for f, body in zip(FILES, (linear_body, ring_body, mod_body)):
+for f, body in zip(FILES, (linear_body, ring_body)):
     check(re.search(r'^\s+.*\bd2\b', body, re.M), f'{f}: d2 holds lastOffset/state')
     check(re.search(r'^\s+.*\ba2\b', body, re.M), f'{f}: a2 is the copy source')
     check(not re.search(r'^\s+.*\bd6\b', body, re.M), f'{f}: d6 is untouched')
@@ -254,7 +232,7 @@ for f in FILES:
     check(bool(re.search(r'add\.w\s+d5,d4\nbpl\.s\s+end_marker', code)),
           f'{f}: nonnegative decoded offsets select the end marker')
     ladder = ladder_remap.findall(code)
-    expected_ladder = [('15', '4')] if f == FILES[2] else [('7', '3')]
+    expected_ladder = [('7', '3')] if f == FILES[0] else [('15', '4')]
     check(ladder == expected_ladder and
           code.count('dbf d4,ladder') == 1 and
           'jmp ladder_end(pc,d4.w)' not in code and
@@ -301,10 +279,10 @@ for f in FILES[1:]:
     check(bool(re.search(r'add\.w\s+d2,d5\nbcs\.s\s+copy', code)),
           f'{f}: offset addition carry selects an unwrapped ring source')
 
-# Linear and ring_mod expose only d1.w/d2.w. Their caller-owned upper halves
-# must never become accidental scratch on resume. The general ring deliberately
-# uses both highs for -start.low and end.low, so it is excluded from this check.
-for f in (FILES[0], FILES[2]):
+# Linear exposes only d1.w/d2.w. Their caller-owned upper halves must never
+# become accidental scratch on resume. The ring deliberately uses both highs
+# for -start.low and end.low, so it is excluded from this check.
+for f in (FILES[0],):
     src = (K68 / f).read_text()
     resume = src[src.index('jx1_resume:'):]
     wide = re.findall(r'^\s+(?:\w+\.l\s+[^;]*\bd[12]\b|swap\s+d[12]\b)',
@@ -333,7 +311,7 @@ check(bool(re.search(
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
-# All three ABIs expose the same compact, gap-free scratch set.
+# Both ABIs expose the same compact, gap-free scratch set.
 for f in FILES:
     src = (K68 / f).read_text()
     header = src[:src.index('TRUSTED INPUT ONLY')]
@@ -349,7 +327,7 @@ for block in re.findall(r'```\n(        lea     stream.*?)```', readme, re.S):
     check(re.search(r'moveq   #\d+,d3', block), 'README example passes the budget in d3')
     check('tst.w   d0' not in block, 'README example does not test the old return register')
 
-# 13. the operation-length contract, stated identically in all three headers and
+# 13. the operation-length contract, stated identically in both headers and
 #     backed by 68k/test/emu/boundaries.py
 for f in FILES:
     src = (K68 / f).read_text()

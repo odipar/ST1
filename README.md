@@ -2,7 +2,7 @@
 
 jx1 is a Java port of [ZX1](https://github.com/einar-saukas/ZX1) v1.5 by
 Einar Saukas. It includes compatible command-line tools, a resumable Java
-decompressor, and three small 68000 decompressors.
+decompressor, and two small 68000 decompressors.
 
 The Java additions are:
 
@@ -59,18 +59,17 @@ have no global state and can be reset and reused.
 
 ## The 68k decompressors
 
-All three files are position-independent, ROM-safe, and keep their entire
+Both files are position-independent, ROM-safe, and keep their entire
 state in registers:
 
 | File | Code | Output | Entries |
 |---|---:|---|---|
 | [jx1_68000.S](68k/jx1_68000.S) | 192 B | linear buffer containing the whole output and match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 248 B | arbitrary caller-supplied ring of N bytes | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 216 B | aligned power-of-two ring with fixed budget X | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 266 B | arbitrary caller-supplied ring of N bytes | `jx1_init`, `jx1_resume` |
 
 Entries are four-byte jump slots in table order. Use the linear decoder unless
-output must pass through bounded memory; ring decoders have no one-shot entry
-because the caller must drain them.
+output must pass through bounded memory; the ring decoder has no one-shot entry
+because the caller must drain it.
 
 ### Trusted input only
 
@@ -86,15 +85,15 @@ Their required contracts are:
   reported but cannot be split, so that output is not 68000-safe.
 * Every resume budget is in 1..65535. A zero budget makes no progress and can
   spin a drain loop forever.
-* A ring has a valid size for its selected decoder, and no stream offset
-  exceeds it. For N below 32512, compress with the matching `-mN`; rings of
+* The ring size is 1..65535 and no stream offset exceeds it. For N below
+  32512, compress with the matching `-mN`; rings of
   at least 32512 bytes cover the format's full offset range.
 * Input, output, and the five state registers remain valid for the full decode.
 
 ### Calling convention
 
-There is no context block. Preserve these five state registers between calls,
-apart from the documented `a1` wrap required by a ring decoder:
+There is no context block. Preserve these five state registers between calls;
+after draining a full ring, `a1` may be changed from the end back to the start:
 
 | Register | Role |
 |---|---|
@@ -105,17 +104,17 @@ apart from the documented `a1` wrap required by a ring decoder:
 | `d2.w` | signed offset/state: `+lastOffset` in LITERALS, `-lastOffset` in MATCH |
 
 With `d1.w = 0`, `d2.w = -1` means START and zero means DONE. After
-initialization, the linear and `ring_mod` resume entries preserve the unused
-high parts of `d0`, `d1`, and `d2`. The general ring instead keeps
+initialization, the linear resume entry preserves the unused high parts of
+`d0`, `d1`, and `d2`. The ring instead keeps
 `-start.low` in `d1.high` and `end.low` in `d2.high`, so its full `d1.l` and
 `d2.l` are state.
 
-For the linear and `ring_mod` decoders, initialize with the stream in `a0` and
-destination in `a1`. General-ring initialization additionally takes its
-one-past-end pointer in `d3.l`. Thereafter, every `jx1_resume` takes a fresh
-budget in `d3.w`; the call spends it rather than refilling it.
+Initialize with the stream in `a0` and destination in `a1`. Ring initialization
+additionally takes its one-past-end pointer in `d3.l`. Thereafter, every
+`jx1_resume` takes a fresh budget in `d3.w`; the call spends it rather than
+refilling it.
 
-All three clobber `d3.w`, `d4.l`, `d5.l`, and `a2.l`. They preserve `d6`,
+Both clobber `d3.w`, `d4.l`, `d5.l`, and `a2.l`. They preserve `d6`,
 `d7`, `a3`–`a6`, and the stack beyond the return address.
 
 Linear example:
@@ -181,45 +180,6 @@ compress with `-mN`; larger rings already cover the format's full range. The
 decoder clamps once at call entry and splits only a match whose source reaches
 the ring end, so bounds work is per call or match segment, not per byte.
 
-### Power-of-two fixed-budget ring
-
-[jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) removes more ring arithmetic
-when all of these promises hold:
-
-* `RING_SIZE` is assembled as a power of two from 1 through 32768.
-* The ring base is aligned to `RING_SIZE`.
-* Every call uses the same nonzero budget X, and X divides `RING_SIZE`.
-* For `RING_SIZE < 32768`, the stream was compressed with
-  `-m<RING_SIZE>`; 32768 covers the format's full 32512-byte offset range.
-
-```
-        ; assemble with RING_SIZE=4096; align ring to 4096
-        lea     stream,a0
-        lea     ring,a1
-        bsr     jx1_init
-.loop:
-        moveq   #16,d3                  ; fixed X; X divides RING_SIZE
-        bsr     jx1_resume
-        moveq   #16,d5
-        sub.w   d3,d5                   ; emitted = requested - unspent
-        movea.l a1,a4
-        suba.l  d5,a4
-        ; consume [a4 .. a1)
-        tst.w   d1
-        beq.s   .done
-        move.w  a1,d5
-        and.w   #RING_SIZE-1,d5
-        bne.s   .loop
-        lea     -RING_SIZE(a1),a1       ; full and drained
-        bra.s   .loop
-.done:
-```
-
-Every non-final call emits exactly X bytes. The final call emits the remainder,
-or a full X when the total output is divisible by X. Violating any alignment,
-size, or fixed-budget promise is undefined; use the general ring when those
-constraints are unsuitable.
-
 ### Testing
 
 The hardware suite assembles fresh TOS programs, verifies every output byte,
@@ -231,21 +191,21 @@ HATARI=/path/to/hatari TOS=/path/to/tos.img 68k/test/run.sh
 ```
 
 <!-- 68k-timings:begin -->
-<!-- Generated by 68k/test/emu/cycle_model.py; inputs a918d446982e -->
+<!-- Generated by 68k/test/emu/cycle_model.py; inputs 087c455dcffa -->
 Fair N=1024, X=16 resume comparison on identical `-m1024` streams.
 Linear means `jx1_resume` at X=16, not the one-shot entry. Values
 are ideal plain-MC68000 cycles for the decoder plus its required
-resume-loop control flow; each ring cell shows its cost versus linear.
+resume-loop control flow; the ring cell shows its cost versus linear.
 
-| corpus | linear | general ring | `ring_mod` |
-|---|---:|---:|---:|
-| text | 11,576 | 12,944 (+11.8%) | 12,674 (+9.5%) |
-| wordsoup | 178,488 | 202,312 (+13.3%) | 198,148 (+11.0%) |
-| farmatch | 77,240 | 86,582 (+12.1%) | 84,246 (+9.1%) |
-| period129 | 28,572 | 31,960 (+11.9%) | 31,084 (+8.8%) |
-| allsame | 27,046 | 30,414 (+12.5%) | 29,646 (+9.6%) |
-| rle32k | 836,982 | 950,000 (+13.5%) | 923,632 (+10.4%) |
-| maxoffset | 886,578 | 934,844 (+5.4%) | 907,456 (+2.4%) |
+| corpus | linear | general ring |
+|---|---:|---:|
+| text | 11,576 | 12,780 (+10.4%) |
+| wordsoup | 178,488 | 201,586 (+12.9%) |
+| farmatch | 77,240 | 85,164 (+10.3%) |
+| period129 | 28,572 | 31,446 (+10.1%) |
+| allsame | 27,046 | 29,912 (+10.6%) |
+| rle32k | 836,982 | 934,374 (+11.6%) |
+| maxoffset | 886,578 | 918,610 (+3.6%) |
 
 The matching hardware measurements, stream-size cost, and regeneration
 command are in [68k/test/README.md](68k/test/README.md).

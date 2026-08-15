@@ -11,11 +11,8 @@
 ; and the wrap is detected the way the interface intends - the write pointer
 ; never wraps inside a call, so a full buffer reaches the harness's saved end.
 ; The general decoder packs -start.low and end.low above its common word-sized
-; state and can wrap on its next entry; ring_mod has no bounds at all, so its
-; caller wraps a1.
-;
-; The general build covers dividing and non-dividing shapes.  Each ring_mod
-; build has one assembly-time RING_SIZE and covers fixed dividing budgets.
+; state and can wrap on its next entry. Dividing and non-dividing shapes are
+; both covered.
 ;
 ; See README.md in this directory for building, running, and the results.
 ; -----------------------------------------------------------------------------
@@ -96,35 +93,15 @@ start:
         bsr     putdec
         bsr     crlf
 
-    .if RINGMOD
-        .if RING_SIZE = RING_SMALL
-        lea     ring_cases,a6                  ; N=256 requires -m256
-        .else
-        lea     fair_cases,a6                  ; fair N=1024 comparison
-        .endif
-    .else
         lea     fair_cases,a6                  ; general timing uses N=1024
-    .endif
 .tcase:
         tst.l   CASE_NAME(a6)
         beq     .done
-    .if RINGMOD
-        move.l  #RING_SIZE,ringsz
-    .else
         move.l  #RING_BIG,ringsz
-    .endif
         moveq   #16,d7
-    .if RINGMOD
-        .if RING_SIZE <> RING_SMALL
         bsr     verify_ring                    ; verify the exact timed stream
         bsr     crlf
         moveq   #16,d7
-        .endif
-    .else
-        bsr     verify_ring                    ; verify the exact timed stream
-        bsr     crlf
-        moveq   #16,d7
-    .endif
         bsr     time_ring
         lea     CASE_SIZE(a6),a6
         bra     .tcase
@@ -175,7 +152,6 @@ verify_ring:
         bsr     jx1_resume                      ; a1 = write pointer, d1 = result
         cmp.l   #$D6D61234,d6
         bne     .bad
-    .if !RINGMOD
         move.l  d1,d4                           ; the general ring's two high
         swap    d4                              ; words are persistent metadata:
         move.l  ringbase,d5
@@ -187,7 +163,6 @@ verify_ring:
         move.l  ringend,d5
         cmp.w   d5,d4
         bne     .bad
-    .endif
         movem.l d0-d2/a0,(a5)                   ; the parse state is in registers
                                                 ; now, and the draining below
                                                 ; clobbers a0 for its compare
@@ -213,19 +188,9 @@ verify_ring:
 .nodata:
         move.l  curdst,prev
         movea.l curdst,a1                       ; the caller holds the write
-    .if RINGMOD
-        tst.w   retcode                         ; DONE needs no next-call wrap
-        beq.s   .more
-        move.w  a1,d5                           ; aligned position, no bounds
-        and.w   #RING_SIZE-1,d5
-        bne.s   .more
-        lea     -RING_SIZE(a1),a1               ; full and drained: end -> start
-        move.l  a1,prev
-    .else
         cmpa.l  ringend,a1                      ; pointer now: hand it back
         bne.s   .more                           ; buffer full?
         move.l  ringbase,prev
-    .endif
 .more:
         movem.l (a5),d0-d2/a0                   ; hand the state back for the
         tst.w   retcode                         ; next call (in memory, not on
@@ -280,28 +245,16 @@ check_size:
 
 ; ring_init: a6 = case, ringsz = ring size, d7.w = chunk.  The general ABI
 ; receives one-past-end transiently in d3.l at init, then packs
-; -start.low/end.low into d1.high/d2.high. ring_mod receives no bounds, but its
-; storage is aligned to its assembly-time power-of-two RING_SIZE.
+; -start.low/end.low into d1.high/d2.high.
 ring_init:
         movea.l CASE_SRC(a6),a0
-    .if RINGMOD
-        lea     ring_storage+RING_SIZE-1,a1
-        move.l  a1,d0
-        and.l   #-RING_SIZE,d0
-        movea.l d0,a1
-    .else
         lea     ring_storage+1,a1               ; retain odd-base coverage
-    .endif
         move.l  a1,ringbase
         movea.l a1,a2
         adda.l  ringsz,a2
         move.l  a2,ringend
-    .if RINGMOD
-        bsr     jx1_init
-    .else
         move.l  a2,d3                           ; end is consumed only at init;
         bsr     jx1_init                        ; resumes need no bound register
-    .endif
         rts
 
 ; -----------------------------------------------------------------------------
@@ -336,19 +289,8 @@ time_ring:
 .drain:
         move.w  d7,d3                           ; the budget is a parameter now
         bsr     jx1_resume
-    .if RINGMOD
-        tst.w   d1                              ; no next call means no wrap
-        beq.s   .decoded
-        move.w  a1,d5                           ; no bound register: alignment
-        and.w   #RING_SIZE-1,d5                 ; exposes the compiled position
-        bne.s   .drain
-        lea     -RING_SIZE(a1),a1               ; end -> start, d16 even at 32768
-        bra.s   .drain
-    .else
         tst.w   d1
         bne.s   .drain
-    .endif
-.decoded:
         subq.l  #1,iters
         bne.s   .loop
         bsr     elapsed
@@ -356,20 +298,10 @@ time_ring:
         bra     crlf
 
 ; ------------------------------------------------------------ the decompressor
-    .if RINGMOD
-        include "jx1_68000_ring_mod.S"
-    .else
         include "jx1_68000_ring.S"
-    .endif
         include "hatari_util.inc"
 
         .data
-    .if RINGMOD
-m_banner:   dc.b    "JX1 ST RING_MOD TEST",13,10,0
-shapes:     dc.l    RING_SIZE,16                    ; every fixed X divides the
-            dc.l    RING_SIZE,64                    ; assembly-time power of two
-            dc.l    0
-    .else
 m_banner:   dc.b    "JX1 ST RING TEST",13,10,0
 shapes:     dc.l    RING_SMALL,16                   ; dividing and non-dividing
             dc.l    RING_SMALL,127                  ; ratios both allowed here
@@ -377,7 +309,6 @@ shapes:     dc.l    RING_SMALL,16                   ; dividing and non-dividing
             dc.l    RING_BIG,16
             dc.l    RING_BIG,127
             dc.l    0
-    .endif
 m_calib:    dc.b    "CALIB ",0
 m_done:     dc.b    "DONE",13,10,0
 m_sp:       dc.b    " ",0
@@ -398,7 +329,7 @@ save_ssp:   ds.l    1
 iters:      ds.l    1
 state:      ds.l    4                           ; d0-d2/a0 across a drain
 ringsz:     ds.l    1                           ; ring size retained by the harness
-ringbase:   ds.l    1                           ; runtime-selected aligned base
+ringbase:   ds.l    1                           ; runtime-selected base
 ringend:    ds.l    1                           ; harness drain boundary
 prev:       ds.l    1
 curdst:     ds.l    1
@@ -411,7 +342,7 @@ sizebad:    ds.b    1
         even
         even
 ring_storage:
-            ds.b    RING_BIG*2                  ; room to align an N-byte ring;
+            ds.b    RING_BIG+1                  ; room for an odd-base N-byte ring;
         even                                    ; still far below streamed output
         ds.b    4096
 stack_top:

@@ -1,8 +1,8 @@
 """Does a caller leaving junk in the clobbered registers break the decoders?
 
 The ABI names the registers jx1_resume clobbers, which promises nothing about
-their incoming values - so a caller may legally pass anything in them.  The
-three decoders deliberately expose the same compact scratch set, checked here.
+their incoming values - so a caller may legally pass anything in them. Both
+decoders expose the same compact scratch set, checked here.
 """
 import sys, importlib.util
 from pathlib import Path
@@ -19,13 +19,12 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_D2, UC_M68K_REG_D3, UC_M68K_REG_D4)
 BIN = POS[0] if POS else 'jx1_68000_ring.bin'
 LINEAR = len(POS) > 1 and POS[1] == 'linear'
-MOD = 'ring_mod' in BIN
 REGS = {'d4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5,
         'a2': UC_M68K_REG_A2}
 
 
 def seed_or_check_state_highs(uc, ring, n, seed=False):
-    if LINEAR or MOD:
+    if LINEAR:
         if seed:
             t.seed_word_state_highs(uc)
         else:
@@ -43,9 +42,9 @@ def seed_or_check_state_highs(uc, ring, n, seed=False):
 def run(data, n, chunk, poison):
     comp = t.java_compress(data, min(n, 32512))
     uc = t.make_emu(comp)
-    ring = ((t.DST + n - 1) & -n) if MOD else t.DST
+    ring = t.DST
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
-    if not LINEAR and not MOD:
+    if not LINEAR:
         uc.reg_write(UC_M68K_REG_D3, ring + n)   # transient general-ring bound
     t.call(uc, t.CODE)
     seed_or_check_state_highs(uc, ring, n, seed=True)
@@ -68,8 +67,6 @@ def run(data, n, chunk, poison):
             return f'DST OUT OF RING ({dst - ring})'
         out += uc.mem_read(prev, max(0, dst - prev))
         if dst == ring + n:
-            if MOD:                             # fixed ring requires caller wrap
-                uc.reg_write(UC_M68K_REG_A1, ring)
             prev = ring
         else:
             prev = dst
@@ -81,8 +78,7 @@ ENTRY = t.CODE + (8 if LINEAR else 4)
 # The loop below drives the ring interface. The linear decoder has no ring - it
 # writes straight ahead - so the only meaningful bound for it is one that holds
 # the whole output; a smaller N would flag ordinary linear output as escaping.
-SIZES = (((65535, 16),) if LINEAR else
-         ((1024, 16),) if MOD else ((1024, 16), (65535, 16)))
+SIZES = ((65535, 16),) if LINEAR else ((1024, 16), (65535, 16))
 POISONS = (('d4',), ('d5',), ('a2',), ('d4', 'd5', 'a2'))
 failures = 0
 for name, data, _ in t.testcases():
@@ -112,9 +108,9 @@ EXPECTED = {'d3', 'd4', 'd5', 'a2'}
 def clobbered(data, n, chunk):
     comp = t.java_compress(data, min(n, 32512))
     uc = t.make_emu(comp)
-    ring = ((t.DST + n - 1) & -n) if MOD else t.DST
+    ring = t.DST
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
-    if not LINEAR and not MOD:
+    if not LINEAR:
         uc.reg_write(UC_M68K_REG_D3, ring + n)
     t.call(uc, t.CODE)
     seed_or_check_state_highs(uc, ring, n, seed=True)
@@ -130,8 +126,6 @@ def clobbered(data, n, chunk):
         seed_or_check_state_highs(uc, ring, n)
         seen |= {name for name, reg in ALL.items()
                  if uc.reg_read(reg) != initial[name]}
-        if not LINEAR and uc.reg_read(UC_M68K_REG_A1) == ring + n and MOD:
-            uc.reg_write(UC_M68K_REG_A1, ring)
         if more == 0:
             return seen
 

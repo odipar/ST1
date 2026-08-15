@@ -159,10 +159,8 @@ def main():
         for binary, run, how in (
                 ('jx1_68000.bin', lambda s: b.run_linear(s), 'one-shot'),
                 ('jx1_68000.bin', lambda s: b.run_linear(s, 16), 'X=16'),
-                ('jx1_68000_ring.bin', lambda s: b.run_ring(s, 32512, 16), 'ring 32512/16'),
-                ('jx1_68000_ring_mod_32768.bin',
-                 lambda s: b.run_ring(s, 32768, 16, True),
-                 'ring_mod 32768/16')):
+                ('jx1_68000_ring.bin', lambda s: b.run_ring(s, 32512, 16),
+                 'ring 32512/16')):
             t.BIN = t._binary(binary)
             try:
                 ok = run(stream) == data
@@ -173,7 +171,7 @@ def main():
                 print(f'   FAIL {name} on {binary} ({how})')
                 failures += 1
 
-    print(f'   {decodes} decodes across the three decompressors')
+    print(f'   {decodes} decodes across both decompressors')
     print('ALL COMPATIBILITY CHECKS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0
 

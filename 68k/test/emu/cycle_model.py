@@ -30,7 +30,7 @@ DATA_FILE = TEST / "timings.json"
 ROOT_README = REPO / "README.md"
 TEST_README = TEST / "README.md"
 CP = REPO / "target" / "classes"
-SCHEMA = 2
+SCHEMA = 3
 
 NAMES = (
     "text", "wordsoup", "farmatch", "period129", "allsame", "rle32k",
@@ -54,7 +54,7 @@ LINEAR_FIXED = 128
 GENERAL_FIXED = 188
 EXPECTED_HARNESS_SCOPES = {
     "linear": "4b2357ceda5d66006befec61e00dc17e88b0739f744ccc8745b091e3f2e9b5f5",
-    "ring": "cfc633d0e4472c51ccd116919284315057d34692bc29dc655e5d23f61f8d0065",
+    "ring": "12349225ea8f31748e7f01c40e92304d74026933cb201c56c16dfa6edcaaefec",
 }
 
 
@@ -62,7 +62,6 @@ def timing_inputs() -> list[Path]:
     fixed = [
         K68 / "jx1_68000.S",
         K68 / "jx1_68000_ring.S",
-        K68 / "jx1_68000_ring_mod.S",
         TEST / "gendata.py",
         TEST / "jx1_hatari.S",
         TEST / "jx1_hatari_ring.S",
@@ -261,13 +260,11 @@ class CycleCounter:
             raise AssertionError(f"unresolved branch at call boundary: {self.pending}")
 
 
-def assemble(directory: Path, source: Path, ring_size: int | None = None):
-    stem = source.stem + (f"_{ring_size}" if ring_size else "")
+def assemble(directory: Path, source: Path):
+    stem = source.stem
     binary = directory / f"{stem}.bin"
     listing = directory / f"{stem}.lst"
     command = ["rmac", "-m68000", "-fr", "+o3"]
-    if ring_size is not None:
-        command.append(f"-dRING_SIZE={ring_size}")
     command += [f"-l*{listing}", "-o", str(binary), str(source)]
     subprocess.run(command, check=True, capture_output=True)
     instructions, symbols = parse_listing(listing)
@@ -322,8 +319,7 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
         ring = dst + 11
         ring_end = ring + int(ring_size)
     else:
-        ring = (dst + int(ring_size) - 1) & -int(ring_size)
-        ring_end = ring + int(ring_size)
+        raise AssertionError(f"unknown decoder variant {variant}")
     emulator.reg_write(UC_M68K_REG_A1, ring)
     if variant == "ring":
         emulator.reg_write(UC_M68K_REG_D3, ring_end)
@@ -335,7 +331,6 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
     output = bytearray()
     previous = ring
     calls = 0
-    wraps = 0
     while True:
         calls += 1
         prior = emulator.reg_read(UC_M68K_REG_D3)
@@ -351,10 +346,6 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
         more = emulator.reg_read(UC_M68K_REG_D1) & 0xFFFF
         if ring_end is not None and current == ring_end:
             previous = ring
-            if more != 0:
-                wraps += 1
-            if variant == "ring_mod" and more != 0:
-                emulator.reg_write(UC_M68K_REG_A1, ring)
         else:
             previous = current
         if more == 0:
@@ -366,7 +357,7 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
         raise AssertionError(f"{variant}: unexpected call count {calls}")
     if emulator.reg_read(UC_M68K_REG_A0) - src != len(compressed):
         raise AssertionError(f"{variant}: compressed input not consumed exactly")
-    return {"internal": counter.cycles, "calls": calls, "wraps": wraps}
+    return {"internal": counter.cycles, "calls": calls}
 
 
 def _label(text: str, name: str, start: int = 0) -> int:
@@ -427,19 +418,16 @@ def build_model() -> dict:
     rows: dict[str, dict[str, dict[str, int]]] = {
         "linear": {"m256/16": {}, "m1024/16": {}, "m1024/127": {}},
         "ring": {"256/16": {}, "1024/16": {}},
-        "ring_mod": {"256/16": {}, "1024/16": {}},
     }
     binaries: dict[str, dict[str, str | int]] = {}
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         assembled = {}
-        for key, source, ring_size in (
-            ("linear", K68 / "jx1_68000.S", None),
-            ("ring", K68 / "jx1_68000_ring.S", None),
-            ("ring_mod_256", K68 / "jx1_68000_ring_mod.S", 256),
-            ("ring_mod_1024", K68 / "jx1_68000_ring_mod.S", 1024),
+        for key, source in (
+            ("linear", K68 / "jx1_68000.S"),
+            ("ring", K68 / "jx1_68000_ring.S"),
         ):
-            binary, listing, symbols = assemble(directory, source, ring_size)
+            binary, listing, symbols = assemble(directory, source)
             assembled[key] = (binary, listing, symbols)
             binaries[key] = {
                 "bytes": len(binary),
@@ -475,13 +463,6 @@ def build_model() -> dict:
                     trace["internal"] + 36 * trace["calls"] - 2 + GENERAL_FIXED
                 )
 
-            for size, profile in ((256, "m256"), (1024, "m1024")):
-                binary, listing, symbols = assembled[f"ring_mod_{size}"]
-                trace = trace_decoder(binary, listing, symbols,
-                                      streams[profile][name], expected,
-                                      "ring_mod", 16, size)
-                rows["ring_mod"][f"{size}/16"][name] = ring_mod_harness_cycles(trace)
-
     return {"cycles": rows, "binaries": binaries,
             "streams": {
                 profile: {
@@ -496,21 +477,6 @@ def build_model() -> dict:
             "output": {name: len(value) for name, value in data.items()}}
 
 
-def ring_mod_harness_cycles(trace: dict[str, int]) -> int:
-    """Exact non-final time_ring iteration for ring_mod.
-
-    Filled in beside the dynamic model because the timed harness checks and
-    resets a1 outside the decoder after every continuing call.
-    """
-    # A continuing no-wrap call costs 56 clocks: MOVE/BSR, TST/BEQ, then the
-    # aligned position's MOVE/AND/BNE. A wrap replaces the taken BNE with its
-    # fall-through, LEA d16 and BRA, adding 16. The final call skips the wrap
-    # check and costs 36; setup, outer-loop control and that final adjustment
-    # reduce to the fixed 188 below.
-    return (trace["internal"] + 56 * trace["calls"]
-            + 16 * trace["wraps"] + 188)
-
-
 def parse_hatari(text: str, expected_fingerprint: str) -> dict:
     if "BAD" in text:
         raise ValueError("Hatari output contains BAD")
@@ -520,7 +486,6 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
     ticks = {
         "linear": {"m1024/16": {}, "m1024/127": {}},
         "ring": {"1024/16": {}},
-        "ring_mod": {"256/16": {}, "1024/16": {}},
     }
     fingerprints: list[str] = []
     for raw in text.replace("\r", "").splitlines():
@@ -535,9 +500,6 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
             banners.append(section)
         elif line == "JX1 ST RING TEST":
             section = "ring"
-            banners.append(section)
-        elif line == "JX1 ST RING_MOD TEST":
-            section = "ring_mod"
             banners.append(section)
         elif line.startswith("CALIB "):
             fields = line.split()
@@ -562,7 +524,7 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
                 ticks["linear"][key][name] = int(value)
                 if int(iterations) != ITERATIONS[name]:
                     raise ValueError(f"iteration count changed: {line}")
-            elif section in {"ring", "ring_mod"} and len(fields) == 6:
+            elif section == "ring" and len(fields) == 6:
                 _, name, size, chunk, iterations, value = fields
                 key = f"{size}/{chunk}"
                 if name not in NAMES or key not in ticks[section]:
@@ -576,25 +538,23 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
                 raise ValueError(f"unrecognized timing line: {line}")
     expected_rows = (
         ticks["linear"]["m1024/16"], ticks["linear"]["m1024/127"],
-        ticks["ring"]["1024/16"], ticks["ring_mod"]["256/16"],
-        ticks["ring_mod"]["1024/16"],
+        ticks["ring"]["1024/16"],
     )
     if any(tuple(row) != NAMES for row in expected_rows):
         raise ValueError("Hatari output is incomplete or corpus order changed")
-    if banners != ["linear", "ring", "ring_mod", "ring_mod"]:
+    if banners != ["linear", "ring"]:
         raise ValueError(f"unexpected Hatari program sequence: {banners}")
-    if text.count("DONE") != 4:
-        raise ValueError("expected all four Hatari executables to reach DONE")
-    if tuple(calibration_blocks) != (0, 1, 2, 3):
-        raise ValueError("expected four Hatari calibration lines")
+    if text.count("DONE") != 2:
+        raise ValueError("expected both Hatari executables to reach DONE")
+    if tuple(calibration_blocks) != (0, 1):
+        raise ValueError("expected two Hatari calibration lines")
     if fingerprints != [expected_fingerprint]:
         raise ValueError(
             "Hatari output was not produced from the current timing inputs"
         )
     calibrations = {
         key: calibration_blocks[index]
-        for index, key in enumerate((
-            "linear", "ring", "ring_mod_256", "ring_mod_1024"))
+        for index, key in enumerate(("linear", "ring"))
     }
     return {"ticks": ticks, "calibration": calibrations,
             "iterations": ITERATIONS}
@@ -617,17 +577,16 @@ def render_root(data: dict) -> str:
         "Fair N=1024, X=16 resume comparison on identical `-m1024` streams.",
         "Linear means `jx1_resume` at X=16, not the one-shot entry. Values",
         "are ideal plain-MC68000 cycles for the decoder plus its required",
-        "resume-loop control flow; each ring cell shows its cost versus linear.",
+        "resume-loop control flow; the ring cell shows its cost versus linear.",
         "",
-        "| corpus | linear | general ring | `ring_mod` |",
-        "|---|---:|---:|---:|",
+        "| corpus | linear | general ring |",
+        "|---|---:|---:|",
     ]
     for name in NAMES:
         linear = cycles["linear"]["m1024/16"][name]
         lines.append(
             f"| {name} | {linear:,} | "
-            f"{comparison_cell(cycles['ring']['1024/16'][name], linear)} | "
-            f"{comparison_cell(cycles['ring_mod']['1024/16'][name], linear)} |"
+            f"{comparison_cell(cycles['ring']['1024/16'][name], linear)} |"
         )
     lines += [
         "",
@@ -650,18 +609,17 @@ def render_test(data: dict) -> str:
         "Every decoder receives the exact same `-m1024` bytes. Linear means its",
         "resumable entry at X=16, not the faster one-shot entry. The totals include",
         "the decoder and only the control flow its harness needs to resume and wrap;",
-        "application-specific consumption is excluded for all three. Ring cells show",
+        "application-specific consumption is excluded for both. The ring cells show",
         "the cycle cost relative to same-stream linear.",
         "",
-        "| corpus | output | stream | linear | general ring | `ring_mod` |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| corpus | output | stream | linear | general ring |",
+        "|---|---:|---:|---:|---:|",
     ]
     for name in NAMES:
         linear = cycles["linear"]["m1024/16"][name]
         lines.append(
             f"| {name} | {output[name]} | {streams['m1024'][name]['bytes']} | "
-            f"{linear:,} | {comparison_cell(cycles['ring']['1024/16'][name], linear)} | "
-            f"{comparison_cell(cycles['ring_mod']['1024/16'][name], linear)} |"
+            f"{linear:,} | {comparison_cell(cycles['ring']['1024/16'][name], linear)} |"
         )
     lines += [
         "",
@@ -678,15 +636,14 @@ def render_test(data: dict) -> str:
         "resolution; percentages here are",
         "therefore less precise than the exact model above.",
         "",
-        "| corpus | repeats | linear ticks | general ring ticks | `ring_mod` ticks |",
-        "|---|---:|---:|---:|---:|",
+        "| corpus | repeats | linear ticks | general ring ticks |",
+        "|---|---:|---:|---:|",
     ]
     for name in NAMES:
         linear = ticks["linear"]["m1024/16"][name]
         lines.append(
             f"| {name} | {ITERATIONS[name]} | {linear} | "
-            f"{comparison_cell(ticks['ring']['1024/16'][name], linear)} | "
-            f"{comparison_cell(ticks['ring_mod']['1024/16'][name], linear)} |"
+            f"{comparison_cell(ticks['ring']['1024/16'][name], linear)} |"
         )
     lines += [
         "",

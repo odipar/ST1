@@ -1,5 +1,11 @@
 # jx1 — the Java version of ZX1 (RETIRED README)
 
+> **Also retired 2026-08-15.** The 216-byte
+> [fixed power-of-two ring decoder](68k/jx1_68000_ring_mod.S) is preserved here
+> for compatibility and size-critical targets. New code should use the active
+> [general ring decoder](../68k/jx1_68000_ring.S), passing `ring+N` in `d3.l`
+> at initialization and preserving full `d1.l`/`d2.l` between calls.
+
 > **Retired 2026-08-13.** jx1 settled on `jx1_68000_opt7.S` as its 68000
 > decompressor; the other seventeen variants and this README moved to
 > `retired/`. This file is kept for its complete variant tables, measured

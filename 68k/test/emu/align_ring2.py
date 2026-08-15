@@ -13,61 +13,36 @@ from unicorn.m68k_const import (UC_M68K_REG_A1, UC_M68K_REG_A0,
                                 UC_M68K_REG_D1, UC_M68K_REG_D2,
                                 UC_M68K_REG_D3)
 bad = []
-MOD = 'ring_mod' in (POS[0] if POS else '')
-
-
-def aligned_ring(n, off):
-    if MOD:
-        base = (t.DST + 8 + n - 1) & -n
-        # Only N=1 can satisfy the fixed-ring contract at both parities.
-        return base + off if n == 1 else base
-    return t.DST + off
 
 
 def audit(shapes):
     for name, data, m in t.testcases():
         for n, chunk, off in shapes:
             comp = t.java_compress(data, min(n, 32512))
-            if MOD:
-                t.BIN = t._binary(f'jx1_68000_ring_mod_{n}.bin')
             uc = t.make_emu(comp)
-            ring = aligned_ring(n, off)
-            assert not MOD or ring % n == 0
+            ring = t.DST + off
             uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE,
                         lambda u, ty, addr, size, val, d:
                             bad.append((name, n, chunk, off, hex(addr), size))
                             if size >= 2 and addr & 1 else None)
             uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
-            if not MOD:
-                uc.reg_write(UC_M68K_REG_D3, ring + n)  # transient init bound
+            uc.reg_write(UC_M68K_REG_D3, ring + n)  # transient init bound
             t.call(uc, t.CODE)
-            if MOD:
-                t.seed_word_state_highs(uc)
-            else:
-                assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
-                assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
+            assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
+            assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
             while True:
                 uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
                 more = t.call(uc, t.CODE + 4)
-                if MOD:
-                    t.assert_word_state_highs(uc)
-                else:
-                    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
-                    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
+                assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
+                assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
                 if more != 0 and uc.reg_read(UC_M68K_REG_A1) == ring + n:
-                    uc.reg_write(UC_M68K_REG_A1, ring)  # required by ring_mod;
-                                                        # legal for general ring
+                    uc.reg_write(UC_M68K_REG_A1, ring)
                 if more == 0:
                     break
-        detail = 'contract-aligned ring bases' if MOD else 'even+odd ring bases'
-        print(f'ALIGN OK {name:11s} ({len(shapes)} shapes, {detail})')
-# The general decoder promises arbitrary byte alignment.  ring_mod instead
-# promises N alignment, so it exercises several aligned powers of two plus
-# both parities at N=1.
-shapes = ([(1, 1, 0), (1, 1, 1), (256, 16, 0), (1024, 64, 0),
-           (32768, 256, 0)] if MOD
-          else [(1000, 16, 0), (1000, 16, 1), (511, 7, 3),
-                (33000, 127, 1)])
+        print(f'ALIGN OK {name:11s} ({len(shapes)} shapes, even+odd ring bases)')
+
+
+shapes = [(1000, 16, 0), (1000, 16, 1), (511, 7, 3), (33000, 127, 1)]
 audit(shapes)
 print('ALIGNMENT AUDIT PASSED' if not bad else f'MISALIGNED ACCESSES: {bad[:5]}')
 sys.exit(1 if bad else 0)

@@ -93,7 +93,7 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         out += uc.mem_read(prev, emitted)
         if dst == ring + n:                     # full buffer
             if caller_wrap:                     # hand it back wrapped, as
-                uc.reg_write(UC_M68K_REG_A1, ring)   # ring_mod requires...
+                uc.reg_write(UC_M68K_REG_A1, ring)   # many callers prefer...
             prev = ring                         # ...or leave it at the end and
         else:                                   # let the decoder wrap on entry
             prev = dst
@@ -147,7 +147,7 @@ def main():
         print(f'{"OK  " if not failures else "    "}{name:11s} '
               f'({len(data)} bytes through {len(sizes)} ring/chunk shapes'
               ', both wrap modes)')
-    print('ALL RING2 TESTS PASS' if not failures else f'{failures} FAILURES')
+    print('ALL GENERAL RING TESTS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0
 
 if __name__ == '__main__':
