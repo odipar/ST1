@@ -1,17 +1,23 @@
-# jx1 / nx1 / ST1 — ZX1 across Java, .NET, and Atari ST
+# ST1 — ZX1 decompression for the Atari ST
 
-`jx1` for Java and `nx1` for C# are ports of
-[ZX1](https://github.com/einar-saukas/ZX1) v1.5 by Einar Saukas. `ST1` is the
-matching resumable 68000 decoder family for the Atari ST.
+`ST1` is the destination of this project: compact, resumable ZX1 decompressors
+for the Atari ST's Motorola 68000. They run from ROM, keep their state in
+registers, and support either linear output or a bounded ring buffer.
 
-## One bitstream, a few aliases
+## Why jx1 and nx1 exist
 
-The names wear their targets like demoscene handles: ZX1 for the ZX Spectrum,
-`jx1` for Java, `nx1` for .NET, and `ST1` for the Atari ST. Lowercase marks the
-host-language ports; machine targets get the full uppercase logo treatment.
-Same ZX1 bitstream, different machine badge—the `1` keeps the family together.
+The Atari ST was always the target. Before committing the decoder to assembly,
+Java `jx1` made the compressor, resumable state machine, and edge cases
+executable and easy to test; C# `nx1` mirrors that portable model independently.
+Together they are the readable specification, test oracle, asset toolchain, and
+development base behind the `ST1.S` translation. `ST1.S` remains handwritten
+and 68000-optimized rather than generated or translated line by line.
 
-The ports add:
+Both workbenches are useful ports in their own right, but their role here is to
+make ST1 assets reproducible and the assembly verifiable. That is why the
+project and repository carry the target's name.
+
+Their ST1-facing controls are:
 
 * `jx1 -mN`/`nx1 -mN` limits encoded back-references;
   `djx1 -mN`/`dnx1 -mN` selects an N-byte decode ring and requires every
@@ -21,6 +27,14 @@ The ports add:
   caller-selected chunk per call.
 * `Decompressor` writes through a caller-supplied ring buffer and `flip`/`Flip`
   hook.
+
+## Same stream, different handles
+
+The naming is deliberately a little demoscene: the target signs the release.
+`ZX1` carries its ZX Spectrum initials; `jx1` is the Java workbench, `nx1` the
+.NET workbench, and `ST1` flies the Atari ST colours. Host-language tools stay
+lowercase; machine code gets the full uppercase logo. These are implementation
+names, not formats—on disk and on the wire, it is all ZX1.
 
 ## Compatibility with ZX1
 
@@ -35,57 +49,6 @@ output, and checks the ST1 decoders on a C-produced stream.
 
 The C# nx1 tests port every Java behavior test and pin the compressor to the
 same original-C golden streams, including skipped, backwards, and quick modes.
-
-## Java CLI
-
-```sh
-mvn package
-java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
-java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
-```
-
-Or run through Maven, which starts a forked JVM with assertions enabled:
-
-```sh
-mvn -q compile exec:exec@jx1  -Dargs="[-f] [-b] [-q] [-mN] [-lN] input [output.zx1]"
-mvn -q compile exec:exec@djx1 -Dargs="[-f] [-mN] input.zx1 [output]"
-```
-
-Malformed-input validation uses Java `assert`, so use `-ea` when invoking the
-classes directly.
-
-## Java decompression API
-
-`Decompressor` takes compressed input, an external ring buffer, and optionally
-a chunk size X. Each `resume()` emits at most X bytes and returns `false` once
-the stream is complete:
-
-```java
-while (decompressor.resume()) {
-    // work between chunks
-}
-```
-
-When the ring fills, the abstract `flip(buffer, length)` method decides where
-its bytes go; the static `decompress` helpers collect them in memory. Instances
-have no global state and can be reset and reused.
-
-## C# CLI (nx1)
-
-The C# implementation targets .NET 10 and mirrors the Java API and command-line
-options. From the repository root:
-
-```sh
-dotnet build csharp/Nx1.slnx -c Release
-dotnet run --project csharp/src/Nx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
-dotnet run --project csharp/src/Dnx1.Cli -- [-f] [-mN] input.zx1 [output]
-dotnet test csharp/Nx1.slnx -c Release
-```
-
-For in-memory decoding, call `Nx1.Decompressor.Decompress(compressed)`. For
-bounded or resumable output, derive from `Decompressor`, implement `Flip`, and
-call `Resume` until it returns `false`. See [csharp/README.md](csharp/README.md)
-for compression, publishing, and project-layout details.
 
 ## ST1 for Atari ST
 
@@ -241,28 +204,77 @@ The matching hardware measurements, stream-size cost, and regeneration
 command are in [68k/test/README.md](68k/test/README.md).
 <!-- 68k-timings:end -->
 
+## jx1 (Java tooling)
+
+```sh
+mvn package
+java -ea -cp target/classes org.jx1.Jx1  [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
+java -ea -cp target/classes org.jx1.Djx1 [-f] [-mN] input.zx1 [output]
+```
+
+Or run through Maven, which starts a forked JVM with assertions enabled:
+
+```sh
+mvn -q compile exec:exec@jx1  -Dargs="[-f] [-b] [-q] [-mN] [-lN] input [output.zx1]"
+mvn -q compile exec:exec@djx1 -Dargs="[-f] [-mN] input.zx1 [output]"
+```
+
+Malformed-input validation uses Java `assert`, so use `-ea` when invoking the
+classes directly.
+
+The Java `Decompressor` takes compressed input, an external ring buffer, and
+optionally a chunk size X. Each `resume()` emits at most X bytes and returns
+`false` once the stream is complete:
+
+```java
+while (decompressor.resume()) {
+    // work between chunks
+}
+```
+
+When the ring fills, the abstract `flip(buffer, length)` method decides where
+its bytes go; the static `decompress` helpers collect them in memory. Instances
+have no global state and can be reset and reused.
+
+## nx1 (.NET tooling)
+
+The C# implementation targets .NET 10 and mirrors the Java API and command-line
+options:
+
+```sh
+dotnet build csharp/Nx1.slnx -c Release
+dotnet run --project csharp/src/Nx1.Cli -- [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
+dotnet run --project csharp/src/Dnx1.Cli -- [-f] [-mN] input.zx1 [output]
+dotnet test csharp/Nx1.slnx -c Release
+```
+
+For in-memory decoding, call `Nx1.Decompressor.Decompress(compressed)`. For
+bounded or resumable output, derive from `Decompressor`, implement `Flip`, and
+call `Resume` until it returns `false`. See [csharp/README.md](csharp/README.md)
+for compression, publishing, and project-layout details.
+
 ## Layout
 
 | Component | Origin |
 |---|---|
+| `ST1` | resumable plain-68000 decoding for the Atari ST |
 | `Block`, `Optimizer` | `zx1.h`, `memory.c`, `optimize.c` |
 | `Compressor` | `compress.c` |
 | `Decompressor` | `dzx1.c`, restructured around resumable ring output |
 | `Jx1` / `Nx1` | the `zx1` tool plus `-mN` and `-lN` |
 | `Djx1` / `Dnx1` | the `dzx1` tool plus `-mN` |
-| `ST1` | resumable plain-68000 decoding for the Atari ST |
 
-The Java sources are under `src/`; equivalent .NET library, CLI, and test
-projects are under [`csharp/`](csharp/); ST1 assembly and hardware tooling are
-under [`68k/`](68k/).
+ST1 assembly and hardware tooling are under [`68k/`](68k/). Its supporting Java
+sources are under `src/`; the equivalent .NET library, CLI, and tests are under
+[`csharp/`](csharp/).
 
-Tagged versions are available from [GitHub Releases](https://github.com/odipar/jx1/releases).
+Tagged versions are available from [GitHub Releases](https://github.com/odipar/ST1/releases).
 
-## License
+## License and attribution
 
 Dual, following the original ZX1 (see [LICENSE](LICENSE)): the compressor is
 BSD 3-Clause; the decompressors may be used freely, including commercially,
-when their documentation says ZX1 was used, via jx1, nx1, or ST1. The ZX1
+when their documentation says ZX1 was used, via ST1, jx1, or nx1. The ZX1
 format and algorithm are by Einar Saukas. The additions are © 2026 Robbert van
 Dalen. The Java, ST1/68000, test, and optimization work was written by Claude
 (Anthropic's Claude Code); the C# nx1 port was written by OpenAI Codex. Both
