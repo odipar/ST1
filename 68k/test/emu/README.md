@@ -76,9 +76,10 @@ budgets.
   outside the ring, that the write pointer never wraps inside a call, that
   the common preserved registers come back untouched, and that a finished
   stream stays finished. At general-ring init only, `d3.l` supplies the end
-  pointer; init packs N into `d1.high` and the end pointer's low word into
-  `d2.high`, leaving no persistent bound register. The general suite checks
-  both packed values throughout its 19 caller-wrap and decoder-wrap shapes.
+  pointer; init packs `-start.low` into `d1.high` and the end pointer's low
+  word into `d2.high`, leaving no persistent bound register. The general suite
+  checks both packed values throughout its 19 caller-wrap and decoder-wrap
+  shapes.
   The fixed suite requires every continuing call to emit exactly one chunk;
   its caller wraps `a1` when it reaches the end.
 * **`compat.py`** is the only script here whose reference is not jx1. It

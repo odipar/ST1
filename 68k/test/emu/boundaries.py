@@ -184,7 +184,8 @@ def run_ring(stream, n, chunk, mod=False, ring=t.DST, caller_wrap=True):
     if mod:
         t.seed_word_state_highs(uc)
     else:
-        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N was not initialized'
+        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
+            'packed -start.low was not initialized'
         assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
             'packed end.low was not initialized'
     out, prev, calls = bytearray(), ring, 0
@@ -196,7 +197,8 @@ def run_ring(stream, n, chunk, mod=False, ring=t.DST, caller_wrap=True):
         dst = uc.reg_read(UC_M68K_REG_A1)
         out += uc.mem_read(prev, dst - prev)
         if not mod:
-            assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed'
+            assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
+                'packed -start.low changed'
             assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
                 'packed end.low changed'
         if dst == ring + n:
@@ -214,9 +216,9 @@ def run_ring(stream, n, chunk, mod=False, ring=t.DST, caller_wrap=True):
 def check_crossing_general_ring():
     """Pin the hardest low-word position case in the general ring.
 
-    N=65535 packs $ffff in d1.high.  The deliberately unaligned placement
-    crosses a 64-K address boundary, and the 65536-byte output fills the ring
-    once before copying the final byte after caller wrap.
+    N=65535 with packed -start.low deliberately crosses a 64-K address
+    boundary, and the 65536-byte output fills the ring once before copying the
+    final byte after caller wrap.
     """
     stream, expected = new_match_stream(MAX_OP)
     ring = t.DST + 0x8001

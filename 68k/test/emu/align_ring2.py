@@ -44,7 +44,7 @@ def audit(shapes):
             if MOD:
                 t.seed_word_state_highs(uc)
             else:
-                assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n
+                assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
                 assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
             while True:
                 uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | chunk)
@@ -52,12 +52,13 @@ def audit(shapes):
                 if MOD:
                     t.assert_word_state_highs(uc)
                 else:
-                    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n
+                    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF)
                     assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF)
-                if uc.reg_read(UC_M68K_REG_A1) == ring + n:
-                    uc.reg_write(UC_M68K_REG_A1, ring)  # ring_mod needs this of
-                if more == 0:                           # its caller; a no-op for
-                    break                               # the general ring
+                if more != 0 and uc.reg_read(UC_M68K_REG_A1) == ring + n:
+                    uc.reg_write(UC_M68K_REG_A1, ring)  # required by ring_mod;
+                                                        # legal for general ring
+                if more == 0:
+                    break
         detail = 'contract-aligned ring bases' if MOD else 'even+odd ring bases'
         print(f'ALIGN OK {name:11s} ({len(shapes)} shapes, {detail})')
 # The general decoder promises arbitrary byte alignment.  ring_mod instead

@@ -11,7 +11,7 @@
 ; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
 ; N and every back-reference must fit it; for N below 32512, compress with -mN.
 ;
-; 240 bytes, position-independent, one body: no macros, no tables, no
+; 248 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -45,10 +45,11 @@
 ; RING BOUNDS. Entry clamps the budget to the destination room, so a1 reaches
 ; the end only as the call's budget expires; the next entry wraps it. A match
 ; source crossing the end splits the copy, and is recomputed for each segment.
-; N in d1.high and end.low in d2.high replace bound registers. The low-word
-; identity position = N + destination - end is exact across 64-K boundaries;
-; adding -offset sets carry for an unwrapped source; otherwise adding N
-; restores it. Bounds work is per call and per match segment, never per byte.
+; -start.low in d1.high and end.low in d2.high replace bound registers. The
+; low-word identity position = destination - start is exact across 64-K
+; boundaries; adding -offset sets carry for an unwrapped source. On the rare
+; wrap path, N = end.low - start.low restores the source or destination.
+; Bounds work is per call and per match segment, never per byte.
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. jx1_init seeds it; preserve all five between
@@ -57,7 +58,7 @@
 ;   a0.l  input position
 ;   a1.l  write pointer - where the output ends, after every call
 ;   d0.b  bit queue ($80 is the empty sentinel)
-;   d1.l  ring size N in the high word, bytes remaining in the low word
+;   d1.l  -start.low in the high word, bytes remaining in the low word
 ;   d2.l  end.low in the high word, signed offset/state in the low word;
 ;         +lastOffset during LITERALS, -lastOffset during MATCH;
 ;         with d1.w = 0, -1 means START and 0 means DONE
@@ -77,8 +78,8 @@
 ;
 ; d4 is gamma/offset scratch and the copy count; d5 is position, room, offset
 ; and ladder scratch. d1.w is the result (zero = done),
-; while d1.high remains N. Refill d3.w before each call. Repeated DONE polls
-; keep d1.w/d2.w zero and retain both metadata high words.
+; while d1.high remains -start.low. Refill d3.w before each call. Repeated
+; DONE polls keep d1.w/d2.w zero and retain both metadata high words.
 ;
 ; -----------------------------------------------------------------------------
 ; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
@@ -107,17 +108,31 @@
                 bra.w   jx1_resume
 
 ; jx1_init: a0 = compressed data, a1 = first ring byte, d3 = one-past-end.
-; Derives N = d3-a1 and packs N/end.low above the common state; writes no memory.
+; Packs -start.low/end.low above the common state; writes no memory.
 ; Java: the Decompressor constructor / reset().
 jx1_init:
-        move.l  d3,d1                   ; N = end - start, packed in d1.high
-        sub.l   a1,d1
-        swap    d1                      ; and remaining = 0 in d1.low
+        moveq   #0,d1
+        sub.w   a1,d1                   ; -start.low, exact modulo 65536
+        swap    d1                      ; pack it high; remaining = 0
         moveq   #-1,d2
         move.w  d3,d2                   ; end.low lives above lastOffset
         swap    d2                      ; -lastOffset = -INITIAL_OFFSET
         moveq   #-128,d0                ; an empty bit queue: $80 is the sentinel
         rts
+
+short_room:                             ; rare: destination wrap or budget clamp
+        tst.w   d5
+        beq.s   wrap_a1
+        move.w  d5,d3                   ; positive room is smaller than budget
+        bra.s   budget_set
+wrap_a1:
+        move.l  d2,d5                   ; N = end.low + (-start.low)
+        clr.w   d5
+        add.l   d1,d5                   ; low words cannot carry into N
+        clr.w   d5
+        swap    d5                      ; zero-extend N
+        suba.l  d5,a1                   ; wrap a1; leave room = N
+        bra.s   have_room
 
 ; jx1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
 ; Emits no more than the budget or destination room. d1.w = 0 means done;
@@ -128,15 +143,9 @@ jx1_resume:
         move.l  d2,d5
         swap    d5                      ; room = end.low - destination.low
         sub.w   a1,d5                   ; exact because the room is <= 65535
-        bne.s   have_room
-        move.l  d1,d5                   ; previous call filled the drained ring
-        clr.w   d5
-        swap    d5                      ; zero-extend N
-        suba.l  d5,a1                   ; wrap a1; leave room = N
 have_room:
         cmp.w   d3,d5                   ; budget = min(budget, room)
-        bcc.s   budget_set
-        move.w  d5,d3
+        bcs.s   short_room               ; zero room means wrap; otherwise clamp
 budget_set:                             ; word clamp ignores upper d3/d5 junk
         tst.w   d1                      ; zero identifies START or DONE
         beq.s   entry_special           ; START/DONE; active ops have remaining
@@ -152,11 +161,8 @@ budget_fits:
         movea.l a1,a2                   ; raw source = dst + -lastOffset
         adda.w  d2,a2
         move.l  d1,d5
-        swap    d5                      ; d5.w = N
-        add.w   a1,d5
-        swap    d2                      ; d2.w = end.low, temporarily
-        sub.w   d2,d5                   ; d5.w = destination position
-        swap    d2                      ; restore lastOffset before using it
+        swap    d5                      ; d5.w = -start.low
+        add.w   a1,d5                   ; d5.w = destination position
         add.w   d2,d5                   ; add -offset; carry means unwrapped
         bcs.s   copy                    ; unwrapped source cannot cross before dst
         neg.w   d5                      ; wrapped: room = offset - position
@@ -164,9 +170,11 @@ budget_fits:
         bcc.s   source_wrapped
         move.w  d5,d4                   ; this segment stops at the wrap
 source_wrapped:
-        move.l  d1,d5                   ; add zero-extended N at any 32-bit address
+        move.l  d2,d5                   ; N = end.low + (-start.low)
         clr.w   d5
-        swap    d5
+        add.l   d1,d5                   ; low words cannot carry into N
+        clr.w   d5
+        swap    d5                      ; zero-extend N at any 32-bit address
         adda.l  d5,a2
         bra.s   copy
 literal_source:

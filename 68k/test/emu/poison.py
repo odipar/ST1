@@ -35,7 +35,8 @@ def seed_or_check_state_highs(uc, ring, n, seed=False):
         t.seed_d0_high(uc)
     else:
         t.assert_d0_high(uc)
-    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N changed'
+    assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
+        'packed -start.low changed'
     assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
         'packed end.low changed'
 

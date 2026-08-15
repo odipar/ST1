@@ -194,9 +194,9 @@ def instruction_text(src):
 
 
 ladder_remap = re.compile(
-    r'moveq\s+#7,d5\n'
+    r'moveq\s+#(7|15),d5\n'
     r'and\.w\s+d4,d5\n'
-    r'lsr\.w\s+#3,d4\n'
+    r'lsr\.w\s+#(3|4),d4\n'
     r'add\.w\s+d5,d5\n'
     r'neg\.w\s+d5\n'
     r'jmp\s+ladder_end\(pc,d5\.w\)')
@@ -253,7 +253,9 @@ for f in FILES:
           f'{f}: negative state selects the match tail')
     check(bool(re.search(r'add\.w\s+d5,d4\nbpl\.s\s+end_marker', code)),
           f'{f}: nonnegative decoded offsets select the end marker')
-    check(len(ladder_remap.findall(code)) == 1 and
+    ladder = ladder_remap.findall(code)
+    expected_ladder = [('15', '4')] if f == FILES[2] else [('7', '3')]
+    check(ladder == expected_ladder and
           code.count('dbf d4,ladder') == 1 and
           'jmp ladder_end(pc,d4.w)' not in code and
           'dbf d5,ladder' not in code,
@@ -301,7 +303,7 @@ for f in FILES[1:]:
 
 # Linear and ring_mod expose only d1.w/d2.w. Their caller-owned upper halves
 # must never become accidental scratch on resume. The general ring deliberately
-# uses both highs for N and end.low, so it is excluded from this width check.
+# uses both highs for -start.low and end.low, so it is excluded from this check.
 for f in (FILES[0], FILES[2]):
     src = (K68 / f).read_text()
     resume = src[src.index('jx1_resume:'):]
@@ -319,15 +321,15 @@ for f in FILES:
     check(bool(d0_ops) and not wide,
           f'{f}: resume touches d0 only with byte operations ({d0_ops})')
 
-# The general ring consumes its end pointer only at init, packing N into
-# d1.high and end.low into d2.high; resume has no persistent bound register.
+# The general ring consumes its end pointer only at init, packing -start.low
+# into d1.high and end.low into d2.high; resume has no persistent bound register.
 ring_src = (K68 / FILES[1]).read_text()
 ring_init = instruction_text(
     ring_src[ring_src.index('jx1_init:'):ring_src.index('jx1_resume:')])
 check(bool(re.search(
-      r'move\.l\s+d3,d1\nsub\.l\s+a1,d1\nswap\s+d1\n'
+      r'moveq\s+#0,d1\nsub\.w\s+a1,d1\nswap\s+d1\n'
       r'moveq\s+#-1,d2\nmove\.w\s+d3,d2\nswap\s+d2', ring_init)),
-      'general ring init packs transient d3 end.low into d2.high')
+      'general ring init packs -start.low/end.low into the state highs')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 

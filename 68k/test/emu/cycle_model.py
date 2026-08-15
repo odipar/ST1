@@ -54,7 +54,7 @@ LINEAR_FIXED = 128
 GENERAL_FIXED = 188
 EXPECTED_HARNESS_SCOPES = {
     "linear": "4b2357ceda5d66006befec61e00dc17e88b0739f744ccc8745b091e3f2e9b5f5",
-    "ring": "5fba5e26e57ed29a84b071079dca04eead0a3e5fd7b1ff842979a693218e708c",
+    "ring": "cfc633d0e4472c51ccd116919284315057d34692bc29dc655e5d23f61f8d0065",
 }
 
 
@@ -350,9 +350,10 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
         output.extend(emulator.mem_read(previous, emitted))
         more = emulator.reg_read(UC_M68K_REG_D1) & 0xFFFF
         if ring_end is not None and current == ring_end:
-            wraps += 1
             previous = ring
-            if variant == "ring_mod":
+            if more != 0:
+                wraps += 1
+            if variant == "ring_mod" and more != 0:
                 emulator.reg_write(UC_M68K_REG_A1, ring)
         else:
             previous = current
@@ -498,15 +499,16 @@ def build_model() -> dict:
 def ring_mod_harness_cycles(trace: dict[str, int]) -> int:
     """Exact non-final time_ring iteration for ring_mod.
 
-    Filled in beside the dynamic model because the timed harness explicitly
-    checks and resets a1 outside the decoder after every call.
+    Filled in beside the dynamic model because the timed harness checks and
+    resets a1 outside the decoder after every continuing call.
     """
-    # Per call: common MOVE/BSR/TST/BNE = 36 clocks (the final BNE saves 2),
-    # plus CMPA abs.l + taken BNE = 32.  A wrap replaces that BNE with its
-    # not-taken form and executes MOVEA abs.l, adding 18.  Ring setup, its BSR,
-    # the outer SUBQ/BNE and the final-BNE adjustment contribute 206.
-    return (trace["internal"] + 68 * trace["calls"]
-            + 18 * trace["wraps"] + 206)
+    # A continuing no-wrap call costs 56 clocks: MOVE/BSR, TST/BEQ, then the
+    # aligned position's MOVE/AND/BNE. A wrap replaces the taken BNE with its
+    # fall-through, LEA d16 and BRA, adding 16. The final call skips the wrap
+    # check and costs 36; setup, outer-loop control and that final adjustment
+    # reduce to the fixed 188 below.
+    return (trace["internal"] + 56 * trace["calls"]
+            + 16 * trace["wraps"] + 188)
 
 
 def parse_hatari(text: str, expected_fingerprint: str) -> dict:
