@@ -10,7 +10,7 @@ own c/zx1/src - not a fixture, and not a binary someone left lying around:
   3. does C decompress what jx1 compresses, including the -mN and -lN options
      C does not have? (they change which parse is chosen, never the encoding,
      so the result has to be ordinary ZX1)
-  4. do the 68000 decoders decode a stream the C compressor produced?
+  4. do the ST1 decoders decode a stream the C compressor produced?
 
 Question 4 is why this lives with the emulator tests: everything else here
 checks jx1 against jx1, so a shared misunderstanding of the format would pass
@@ -152,14 +152,14 @@ def main():
                 failures += 1
     print(f'   {len(CORPORA)} corpora x {len(JX1_FLAGS) + 1} option sets')
 
-    print('4. the 68000 decoders decode a stream the C compressor produced')
+    print('4. the ST1 decoders decode a stream the C compressor produced')
     decodes = 0
     for name, data in CORPORA:
         stream = c_compress(data)
         for binary, run, how in (
-                ('jx1_68000.bin', lambda s: b.run_linear(s), 'one-shot'),
-                ('jx1_68000.bin', lambda s: b.run_linear(s, 16), 'X=16'),
-                ('jx1_68000_ring.bin', lambda s: b.run_ring(s, 32512, 16),
+                ('ST1.bin', lambda s: b.run_linear(s), 'one-shot'),
+                ('ST1.bin', lambda s: b.run_linear(s, 16), 'X=16'),
+                ('ST1_ring.bin', lambda s: b.run_ring(s, 32512, 16),
                  'ring 32512/16')):
             t.BIN = t._binary(binary)
             try:

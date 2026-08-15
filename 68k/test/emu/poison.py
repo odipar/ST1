@@ -1,6 +1,6 @@
 """Does a caller leaving junk in the clobbered registers break the decoders?
 
-The ABI names the registers jx1_resume clobbers, which promises nothing about
+The ABI names the registers ST1_resume clobbers, which promises nothing about
 their incoming values - so a caller may legally pass anything in them. Both
 decoders expose the same compact scratch set, checked here.
 """
@@ -10,14 +10,14 @@ SCRATCH = Path(__file__).resolve().parent
 ARGS = list(sys.argv)
 sp = importlib.util.spec_from_file_location('t', SCRATCH / 'test68k.py')
 POS = [a for a in ARGS[1:] if not a.startswith('-')]   # flags (--full) are not positional arguments
-sys.argv = ['x', POS[0] if POS else 'jx1_68000_ring.bin']
+sys.argv = ['x', POS[0] if POS else 'ST1_ring.bin']
 t = importlib.util.module_from_spec(sp); sp.loader.exec_module(t)
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_A4, UC_M68K_REG_A3, UC_M68K_REG_A5,
                                 UC_M68K_REG_A6, UC_M68K_REG_D5, UC_M68K_REG_D7,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D3, UC_M68K_REG_D4)
-BIN = POS[0] if POS else 'jx1_68000_ring.bin'
+BIN = POS[0] if POS else 'ST1_ring.bin'
 LINEAR = len(POS) > 1 and POS[1] == 'linear'
 REGS = {'d4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5,
         'a2': UC_M68K_REG_A2}

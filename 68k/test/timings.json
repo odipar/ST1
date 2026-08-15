@@ -1,5 +1,5 @@
 {
-  "fingerprint": "62a6a2909a38c9b2c2ac607f12139edcb20d94cb8473d826b150fbe073718d14",
+  "fingerprint": "2fe0ff39e57335b9c5b72b2e29ebf2d1ce229ad7f97026f003d7d217617503d3",
   "hatari": {
     "calibration": {
       "linear": {
@@ -55,21 +55,21 @@
     }
   },
   "inputs": {
-    "68k/jx1_68000.S": "990a97c2393f2f4c0a814ac030bf7e24623356f582c88da00309fa0f1a6e4ac3",
-    "68k/jx1_68000_ring.S": "250e16577008eb2248e3b102b056dcac90f4924756361e31c4dc9558e04af33d",
-    "68k/test/emu/cycle_model.py": "eedabbc007a46523c839dc96d711c5e9029b9c17588524dab41848965ebc0235",
-    "68k/test/gendata.py": "db6da30b5898677c0db6f14bb92ba52ee7f58cf6e64ceea69dede23d8c74e2d7",
+    "68k/ST1.S": "1dec47231489b01f159f66268b7f04a5c0f00e7a9ebb31b6dce58908134009fc",
+    "68k/ST1_ring.S": "2b497ef08f526f59fba93f5833431fa5729c94d448209100011105178f45386d",
+    "68k/test/ST1_ring_test.S": "52a9f931adafa5264ca587b0c7d07340dcc75ca88a5fe8d943c5e748aabb0f5e",
+    "68k/test/ST1_test.S": "2d03f4800b7933d2dac0aefcdb640ea316fb3fccc6d0adc1e53324d4556ebb1f",
+    "68k/test/emu/cycle_model.py": "31ba70a04840a311f40cc4da33aaa5baa75afa3f4afe3787ffb1d7fbd2b5ef8f",
+    "68k/test/gendata.py": "6011375674490f2e950a5213d22c3ae8ec6fcc3fe706d21fbd3860f7bb8e74a7",
     "68k/test/hatari_util.inc": "5a6ee71964e2e741f691b5c6b52d8badebac79399c6e357d485fb05de64cf405",
-    "68k/test/jx1_hatari.S": "bf808c2caad995c4a186523b1828ea57b7d122501daa9ff49fc56958a036d552",
-    "68k/test/jx1_hatari_ring.S": "c0f8243ae0bc40c76899efc8c62f14d3345f3cc7a1b8116c3d3946cf6989b91e",
-    "68k/test/run.sh": "aa0e76db80900f02da7deea2435a0dcc40a60772f5e358d8166a78d441beeb3b",
+    "68k/test/run.sh": "5ff510aeedde696220f0fc5046ac954858d1bd6f1eceed497c398d85c259bab8",
     "pom.xml": "7cc4885331b2329b5f599b43391496f3464c1b8e177f1534ad0bcd86b04f475a",
     "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
     "src/main/java/org/jx1/Cli.java": "024bf122102d3b7f65c73f71668584d4145ae390d6ea69a10c1513ed4b3b6e7d",
-    "src/main/java/org/jx1/Compressor.java": "586366b3ce7aa6e3b61bf784259e813d1f04691bf0547bd3365cd445f32868c5",
-    "src/main/java/org/jx1/Decompressor.java": "1c5984f4a968f837d69a215edb6be372ba2d95d2d3d383ec2eca8f7c9797649f",
+    "src/main/java/org/jx1/Compressor.java": "4917bb5d80a6a6c9f7fb2e2a9e01a186ab0e22cbc56ba16263e4346629145e49",
+    "src/main/java/org/jx1/Decompressor.java": "cc7cc9f2a21d80b42c4c206df448d70ba59010fc02a29896d1c97469b7cd0e8f",
     "src/main/java/org/jx1/Djx1.java": "eddb6c0e379a73e843cf84b7982da4c8af2600971c7afa5e65c3ea4d76dc5f24",
-    "src/main/java/org/jx1/Jx1.java": "50af454ecc6899b80cdc57332ab5f5c58e00751639690dd1d93707e097ff16ff",
+    "src/main/java/org/jx1/Jx1.java": "6a22c7381d0ca55c0bf863f97fd78f77f9a78d340052f66fefae8a9ad0c9305a",
     "src/main/java/org/jx1/Optimizer.java": "77503c26d694b8f6f45ba818bef76383635df8e19899331cae1800a152145031"
   },
   "model": {

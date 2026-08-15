@@ -1,5 +1,5 @@
 ; -----------------------------------------------------------------------------
-; jx1_hatari_ring.S - real-hardware validation for 68k/jx1_68000_ring.S
+; ST1_ring_test.S - real-hardware validation for 68k/ST1_ring.S
 ;
 ; The ring decompressor's whole point is bounded memory, so this decompresses
 ; corpora far larger than the buffer they stream through (32000 bytes through
@@ -149,7 +149,7 @@ verify_ring:
         movea.l d3,a2                           ; poison every scratch register
         move.l  #$D6D61234,d6                   ; d6 is promised untouched
         move.w  d7,d3                           ; d3.w is this call's budget
-        bsr     jx1_resume                      ; a1 = write pointer, d1 = result
+        bsr     ST1_resume                      ; a1 = write pointer, d1 = result
         cmp.l   #$D6D61234,d6
         bne     .bad
         move.l  d1,d4                           ; the general ring's two high
@@ -254,7 +254,7 @@ ring_init:
         adda.l  ringsz,a2
         move.l  a2,ringend
         move.l  a2,d3                           ; end is consumed only at init;
-        bsr     jx1_init                        ; resumes need no bound register
+        bsr     ST1_init                        ; resumes need no bound register
         rts
 
 ; -----------------------------------------------------------------------------
@@ -288,7 +288,7 @@ time_ring:
         bsr     ring_init
 .drain:
         move.w  d7,d3                           ; the budget is a parameter now
-        bsr     jx1_resume
+        bsr     ST1_resume
         tst.w   d1
         bne.s   .drain
         subq.l  #1,iters
@@ -298,11 +298,11 @@ time_ring:
         bra     crlf
 
 ; ------------------------------------------------------------ the decompressor
-        include "jx1_68000_ring.S"
+        include "ST1_ring.S"
         include "hatari_util.inc"
 
         .data
-m_banner:   dc.b    "JX1 ST RING TEST",13,10,0
+m_banner:   dc.b    "ST1 RING TEST",13,10,0
 shapes:     dc.l    RING_SMALL,16                   ; dividing and non-dividing
             dc.l    RING_SMALL,127                  ; ratios both allowed here
             dc.l    RING_ODD,16

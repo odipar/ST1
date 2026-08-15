@@ -1,9 +1,9 @@
 using Xunit;
 
-using CompressorCli = global::Jx1.Jx1;
-using DecompressorCli = global::Jx1.Djx1;
+using CompressorCli = global::Nx1.Nx1;
+using DecompressorCli = global::Nx1.Dnx1;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class CliTests
 {
@@ -71,7 +71,7 @@ public sealed class CliTests
     {
         private readonly string path = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(),
-            $"jx1-csharp-tests-{Guid.NewGuid():N}");
+            $"nx1-csharp-tests-{Guid.NewGuid():N}");
 
         internal TemporaryDirectory()
         {

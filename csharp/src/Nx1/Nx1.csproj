@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>Jx1.Core</AssemblyName>
-    <PackageId>Jx1.Core</PackageId>
-    <RootNamespace>Jx1</RootNamespace>
+    <AssemblyName>Nx1.Core</AssemblyName>
+    <PackageId>Nx1.Core</PackageId>
+    <RootNamespace>Nx1</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>

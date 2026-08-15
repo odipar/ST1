@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>dnx1</AssemblyName>
+    <PackageId>Nx1.Decompressor.Tool</PackageId>
+    <RootNamespace>Nx1.CommandLine</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Nx1/Nx1.csproj" />
+  </ItemGroup>
+</Project>

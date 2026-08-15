@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class GoldenTests
 {
@@ -30,7 +30,7 @@ public sealed class GoldenTests
         AssertGolden(
             "f761627261636164f22a6920686f6375732070f4d0bdb8baaf40ffff",
             2,
-            Compress(TestData.Text(), 0, global::Jx1.Jx1.MaxOffsetZx1, false));
+            Compress(TestData.Text(), 0, global::Nx1.Nx1.MaxOffsetZx1, false));
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class GoldenTests
         AssertGolden(
             "dc636164f2a920686f6375732070f4a6d0f6b8eabdffff",
             2,
-            Compress(TestData.Text(), 4, global::Jx1.Jx1.MaxOffsetZx1, false));
+            Compress(TestData.Text(), 4, global::Nx1.Nx1.MaxOffsetZx1, false));
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class GoldenTests
         Compressor.Result result = Compress(
             input,
             0,
-            global::Jx1.Jx1.MaxOffsetZx1 - 1,
+            global::Nx1.Nx1.MaxOffsetZx1 - 1,
             true);
         Array.Reverse(result.Output);
 
@@ -71,7 +71,7 @@ public sealed class GoldenTests
             + "17e14f1ce8b1698341734a6823ce02043e016b544901214a2ddab82fec85c0b9fe0549c475be5b887b"
             + "b478afeabd75e8eafdffff",
             2,
-            Compress(TestData.FarMatch(), 0, global::Jx1.Jx1.MaxOffsetZx1, false));
+            Compress(TestData.FarMatch(), 0, global::Nx1.Nx1.MaxOffsetZx1, false));
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class GoldenTests
             + "6017e14f1ce8b1698341734a6823ce02043e016b544901214a2ddab82fec85c0b9fe0549c475be5b88"
             + "7bb4ffff",
             4,
-            Compress(TestData.FarMatch(), 0, global::Jx1.Jx1.MaxOffsetZx7, false));
+            Compress(TestData.FarMatch(), 0, global::Nx1.Nx1.MaxOffsetZx7, false));
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class GoldenTests
         Compressor.Result result = Compress(
             TestData.WordSoup(),
             0,
-            global::Jx1.Jx1.MaxOffsetZx1,
+            global::Nx1.Nx1.MaxOffsetZx1,
             false);
 
         Assert.Equal(777, result.Output.Length);

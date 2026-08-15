@@ -1,16 +1,20 @@
 # jx1 — the Java version of ZX1 (RETIRED README)
 
+> The archived `jx1_68000*` filenames and `jx1_*` symbols predate the ST1
+> name and remain unchanged as historical snapshots. The active Atari ST
+> decoders are [ST1](../68k/ST1.S) and [ST1 ring](../68k/ST1_ring.S).
+
 > **Also retired 2026-08-15.** The 216-byte
 > [fixed power-of-two ring decoder](68k/jx1_68000_ring_mod.S) is preserved here
 > for compatibility and size-critical targets. New code should use the active
-> [general ring decoder](../68k/jx1_68000_ring.S), passing `ring+N` in `d3.l`
+> [general ring decoder](../68k/ST1_ring.S), passing `ring+N` in `d3.l`
 > at initialization and preserving full `d1.l`/`d2.l` between calls.
 
 > **Retired 2026-08-13.** jx1 settled on `jx1_68000_opt7.S` as its 68000
 > decompressor; the other seventeen variants and this README moved to
 > `retired/`. This file is kept for its complete variant tables, measured
-> speed figures, and the pick guide. opt7 itself still lives (renamed
-> `jx1_68000.S`) at [../68k/jx1_68000.S](../68k/jx1_68000.S), though it has
+> speed figures, and the pick guide. opt7 itself still lives, evolved and
+> branded ST1, at [../68k/ST1.S](../68k/ST1.S), though it has
 > been optimised further since - the figures in the tables below describe it
 > as opt7 was, at 324 bytes, not as it stands now; all other
 > variant links below point at their retired copies. The current README is
@@ -69,7 +73,7 @@ out), text (28/360), far-match (212/2900), all-same (6/1000), max-offset
 | [jx1_68000_opt4.S](68k/jx1_68000_opt4.S) | 418 | 15 | opt3 plus a two-tier copy engine: sizes <16 dispatch on `n&15` into a ladder of 16 rolled-out `move.b`s (computed `jmp (a4)`, address registers only); ≥16 uses an unrolled `move.l` pair loop with long/word/byte tail after an aligning head byte (needs equal parity, offset ≥ 4 for matches) — gate failures run ladder passes instead | vs opt3 at chunk 127: +33–44% on all copy-dominated data, +2% parse-heavy; at chunk 16: +5–8% copy-dominated, −3% parse-heavy |
 | [jx1_68000_opt5.S](68k/jx1_68000_opt5.S) | 336 | 15 | opt4 reduced to the ladder alone: every copy dispatches on `n&15` into the rolled-out `move.b` ladder plus `n>>4` full passes — no alignment/overlap gates, uniform ~12.6 cycles/byte | 0.3–37% over opt3 everywhere; 2–8% over opt4 except large aligned copies at chunk 127, where opt4 stays 2–24% ahead |
 | [jx1_68000_opt6.S](68k/jx1_68000_opt6.S) | 316 | 15 | opt5 with an 8-step ladder and a pc-relative dispatch (`jmp ladder_end(pc,d0.w)` with d0 = −2·(n&7), the file's one indexed mode): no base register, a3/a4 free again, clobbers back to d0–d5/a0–a2 | +0.4–0.6% over opt5 at chunk 16; 0.4–3.5% behind at chunk 127 (dbf every 8 bulk bytes instead of 16) |
-| [jx1_68000_opt7.S](../68k/jx1_68000.S) | 324 | 15 | opt6 with `get_gamma` peeled and rotated: the first continuation bit is read up front (length-1 values fall straight through) and the continue branch doubles as the loop jump — no unconditional `bra` per pair, no macros, no unrolling | +2.9–3.7% over opt6 on parse-heavy data, +1.1–2.1% text, +0.0–0.4% copy-dominated |
+| [jx1_68000_opt7.S](../68k/ST1.S) | 324 | 15 | opt6 with `get_gamma` peeled and rotated: the first continuation bit is read up front (length-1 values fall straight through) and the continue branch doubles as the loop jump — no unconditional `bra` per pair, no macros, no unrolling | +2.9–3.7% over opt6 on parse-heavy data, +1.1–2.1% text, +0.0–0.4% copy-dominated |
 
 ## 68k exploration variants
 
@@ -104,7 +108,7 @@ small chunks is the whole point. The baseline stays the no-assumptions
 reference. At chunk 127 the gaps widen further (opt7 reaches +39–51% over
 the baseline).
 
-| | [jx1_68000.S](68k/jx1_68000.S) | [jx1_68000_opt7.S](../68k/jx1_68000.S) | [jx1_68000_opt_x16.S](68k/jx1_68000_opt_x16.S) |
+| | [jx1_68000.S](68k/jx1_68000.S) | [jx1_68000_opt7.S](../68k/ST1.S) | [jx1_68000_opt_x16.S](68k/jx1_68000_opt_x16.S) |
 |---|---|---|---|
 | Code bytes | 284 | 324 | 1114 (602 code + 512 table) |
 | State bytes | 22 | 15 | 16 |

@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Jx1.Tests;
+namespace Nx1.Tests;
 
 public sealed class ResumableTests
 {

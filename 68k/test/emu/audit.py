@@ -8,7 +8,7 @@ ok, bad = [], []
 def check(cond, msg):
     (ok if cond else bad).append(msg)
 
-FILES = ['jx1_68000.S', 'jx1_68000_ring.S']
+FILES = ['ST1.S', 'ST1_ring.S']
 sizes = {}
 for f in FILES:
     out = subprocess.run(ASM + ['-o', '/tmp/a.bin', str(K68 / f)],
@@ -37,9 +37,9 @@ for f in FILES:
 # 3. every documented entry exists, and the jump table matches
 for f in FILES:
     src = (K68 / f).read_text()
-    slots = re.findall(r'^\s+bra\.w\s+(jx1_\w+)', src, re.M)
-    expect = (['jx1_init', 'jx1_decompress', 'jx1_resume'] if f == 'jx1_68000.S'
-              else ['jx1_init', 'jx1_resume'])
+    slots = re.findall(r'^\s+bra\.w\s+(ST1_\w+)', src, re.M)
+    expect = (['ST1_init', 'ST1_decompress', 'ST1_resume'] if f == 'ST1.S'
+              else ['ST1_init', 'ST1_resume'])
     check(slots == expect, f'{f}: jump table {slots} vs documented {expect}')
 
 # 4. the budget is a per-call parameter in d3.w, not a field and not state
@@ -84,14 +84,14 @@ for f in FILES:
           f'{f}: match source consumes the negated offset directly')
 
 # 6. no stale ctx_alloc, no stale 15-byte wording anywhere current
-for f in FILES + ['test/jx1_hatari.S', 'test/jx1_hatari_ring.S']:
+for f in FILES + ['test/ST1_test.S', 'test/ST1_ring_test.S']:
     src = (K68 / f).read_text()
     check('ctx_alloc' not in src, f'{f}: no ctx_alloc left')
     check('15 byte' not in src and '15-byte' not in src, f'{f}: no 15-byte wording')
 check('15-byte' not in readme, 'README: no 15-byte wording')
 
 # 7. the ST ring harness covers both dividing and non-dividing legal shapes.
-harness = (K68 / 'test' / 'jx1_hatari_ring.S').read_text()
+harness = (K68 / 'test' / 'ST1_ring_test.S').read_text()
 named = dict(re.findall(r'^(RING_\w+)\s+equ\s+(\d+)', harness, re.M))
 
 
@@ -115,7 +115,7 @@ check('exit $fail' in runsh and 'BAD' in runsh, 'run.sh fails the command on BAD
 check(not re.search(r'\b(32[0-9]|33[0-9])\b', runsh), 'run.sh quotes no stale byte counts')
 
 # 9. both harnesses poison the clobbered registers
-for f in ('test/jx1_hatari.S', 'test/jx1_hatari_ring.S'):
+for f in ('test/ST1_test.S', 'test/ST1_ring_test.S'):
     src = (K68 / f).read_text()
     check('$BEEF0000' in src, f'{f}: poisons the clobbered registers before resume')
 
@@ -284,7 +284,7 @@ for f in FILES[1:]:
 # for -start.low and end.low, so it is excluded from this check.
 for f in (FILES[0],):
     src = (K68 / f).read_text()
-    resume = src[src.index('jx1_resume:'):]
+    resume = src[src.index('ST1_resume:'):]
     wide = re.findall(r'^\s+(?:\w+\.l\s+[^;]*\bd[12]\b|swap\s+d[12]\b)',
                       resume, re.M)
     check(not wide, f'{f}: resume leaves d1.high/d2.high untouched ({wide})')
@@ -293,7 +293,7 @@ for f in (FILES[0],):
 # whole register, but resume must preserve the caller-owned upper 24 bits.
 for f in FILES:
     src = (K68 / f).read_text()
-    resume = src[src.index('jx1_resume:'):]
+    resume = src[src.index('ST1_resume:'):]
     d0_ops = re.findall(r'^\s+(\w+(?:\.[bwl])?)\s+[^;\n]*\bd0\b', resume, re.M)
     wide = [op for op in d0_ops if not op.endswith('.b')]
     check(bool(d0_ops) and not wide,
@@ -303,7 +303,7 @@ for f in FILES:
 # into d1.high and end.low into d2.high; resume has no persistent bound register.
 ring_src = (K68 / FILES[1]).read_text()
 ring_init = instruction_text(
-    ring_src[ring_src.index('jx1_init:'):ring_src.index('jx1_resume:')])
+    ring_src[ring_src.index('ST1_init:'):ring_src.index('ST1_resume:')])
 check(bool(re.search(
       r'moveq\s+#0,d1\nsub\.w\s+a1,d1\nswap\s+d1\n'
       r'moveq\s+#-1,d2\nmove\.w\s+d3,d2\nswap\s+d2', ring_init)),
@@ -322,7 +322,7 @@ for f in FILES:
 # The calling sequences in the README are code a reader will copy, so they have
 # to use the registers the decoders actually use.
 for block in re.findall(r'```\n(        lea     stream.*?)```', readme, re.S):
-    check('bsr     jx1_resume' in block, 'README example calls jx1_resume')
+    check('bsr     ST1_resume' in block, 'README example calls ST1_resume')
     check('tst.w   d1' in block, 'README example tests remaining/result in d1')
     check(re.search(r'moveq   #\d+,d3', block), 'README example passes the budget in d3')
     check('tst.w   d0' not in block, 'README example does not test the old return register')

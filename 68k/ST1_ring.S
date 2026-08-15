@@ -1,12 +1,12 @@
 ; -----------------------------------------------------------------------------
-; jx1_68000_ring.S - JX1: resumable ZX1 decompressor with a RING BUFFER (68000)
+; ST1_ring.S - ST1: resumable ZX1 ring decompressor for the Atari ST (68000)
 ;
 ; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas (data compression
 ; format, algorithm, and the original C/z80 decompressors). Code written by
 ; Claude (Anthropic's Claude Code) under Robbert's direction. The
 ; decompressor can be used freely within your own programs, even
 ; commercially, as long as your documentation indicates that you used
-; ZX1/jx1 (see LICENSE).
+; ZX1 through ST1 (see LICENSE).
 ;
 ; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
 ; N and every back-reference must fit it; for N below 32512, compress with -mN.
@@ -24,11 +24,11 @@
 ;       lea     ring,a1                 ; N bytes, any alignment
 ;       lea     ring+N,a3               ; caller keeps the end for draining
 ;       move.l  a3,d3                   ; init takes it transiently
-;       bsr     jx1_init
+;       bsr     ST1_init
 ;   .loop:
 ;       move.l  a1,-(sp)                ; first output byte for this call
 ;       moveq   #16,d3                  ; at most 16 bytes from this call
-;       bsr     jx1_resume
+;       bsr     ST1_resume
 ;       movea.l (sp)+,a2                ; a2 is already caller-clobbered
 ;       ; consume [a2 .. a1)
 ;       cmpa.l  a3,a1                   ; buffer full?
@@ -49,7 +49,7 @@
 ; Bounds work is per call and per match segment, never per byte.
 ;
 ; -----------------------------------------------------------------------------
-; THE STATE IS YOUR REGISTERS. jx1_init seeds it; preserve all five between
+; THE STATE IS YOUR REGISTERS. ST1_init seeds it; preserve all five between
 ; calls except for the documented a1 ring wrap:
 ;
 ;   a0.l  input position
@@ -67,7 +67,7 @@
 ;
 ;   in and out   a0.l a1.l d0.b      the state; leave it alone between calls
 ;                d1.l d2.l
-;   init in      d3.l                one-past-end; packed by jx1_init
+;   init in      d3.l                one-past-end; packed by ST1_init
 ;   resume in    d3.w                this call's budget, spent by the call
 ;   CLOBBERED    d3.w d4.l d5.l      no value in these survives a call
 ;                a2.l
@@ -82,13 +82,13 @@
 ; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
 ;
 ;   1. no single literal run or match is longer than 65535 bytes - an
-;      operation length is a word; compress with jx1 -l65535
+;      operation length is a word; compress with jx1/nx1 -l65535
 ;   2. the budget in d3.w is 1..65535
 ;   3. the ring buffer size N is 1..65535. The format's offsets stop at 32512,
 ;      so a larger ring could never be referenced anyway
 ;   4. no back-reference offset exceeds N. For N below 32512, compress with
 ;      -mN; rings of at least 32512 bytes cover the format's full offset range
-;   5. at jx1_init, a1 is the first ring byte and d3 is one past the last;
+;   5. at ST1_init, a1 is the first ring byte and d3 is one past the last;
 ;      their difference is N. Preserve the state after init except for the
 ;      documented a1 wrap; always preserve the packed high words
 ;
@@ -100,14 +100,14 @@
 ; -----------------------------------------------------------------------------
 
 ; Jump table: bra.w keeps 4-byte slots (base+0/4). A bounded ring has no
-; one-shot entry; the caller drains it through jx1_resume.
-                bra.w   jx1_init
-                bra.w   jx1_resume
+; one-shot entry; the caller drains it through ST1_resume.
+                bra.w   ST1_init
+                bra.w   ST1_resume
 
-; jx1_init: a0 = compressed data, a1 = first ring byte, d3 = one-past-end.
+; ST1_init: a0 = compressed data, a1 = first ring byte, d3 = one-past-end.
 ; Packs -start.low/end.low above the common state; writes no memory.
 ; Java: the Decompressor constructor / reset().
-jx1_init:
+ST1_init:
         moveq   #0,d1
         sub.w   a1,d1                   ; -start.low, exact modulo 65536
         swap    d1                      ; pack it high; remaining = 0
@@ -140,12 +140,12 @@ source_wrapped:
         adda.l  d5,a2
         bra.s   copy
 
-; jx1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
+; ST1_resume: a0/a1/d0/d1/d2 = the state and d3.w = this call's budget.
 ; Emits no more than the budget or destination room. d1.w = 0 means done;
 ; [old a1 .. new a1) is fresh output. After draining at the end, either wrap
 ; a1 explicitly or let the next entry wrap it.
 ; Java: Decompressor.resume().
-jx1_resume:
+ST1_resume:
         move.l  d2,d5
         swap    d5                      ; room = end.low - destination.low
         sub.w   a1,d5                   ; exact because the room is <= 65535

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nx1/Nx1.csproj" />
+    <Project Path="src/Nx1.Cli/Nx1.Cli.csproj" />
+    <Project Path="src/Dnx1.Cli/Dnx1.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nx1.Tests/Nx1.Tests.csproj" />
+  </Folder>
+</Solution>

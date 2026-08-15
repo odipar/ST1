@@ -1,17 +1,18 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>Command-line ZX1 compressor.</summary>
 /// <remarks>
-/// C# counterpart of the Java <c>Jx1</c> entry point, itself a port of
+/// <c>Nx1</c> is the C# counterpart of the Java <c>Jx1</c> entry point,
+/// itself a port of
 /// <c>zx1.c</c> from
 /// <see href="https://github.com/einar-saukas/ZX1">ZX1</see> by Einar Saukas.
 /// It adds configurable offset and operation-length limits while preserving
 /// the ZX1 bitstream format.
 /// </remarks>
-public static class Jx1
+public static class Nx1
 {
     /// <summary>Largest back-reference representable by the ZX1 format.</summary>
     public const int MaxOffsetZx1 = 32_512;
@@ -19,13 +20,13 @@ public static class Jx1
     /// <summary>Offset limit used by quick mode, matching ZX7's window.</summary>
     public const int MaxOffsetZx7 = 2_176;
 
-    /// <summary>Largest operation length representable by the 68000 decoders.</summary>
-    public const int MaxOp68K = 65_535;
+    /// <summary>Largest operation length representable by the ST1 decoders.</summary>
+    public const int MaxOpSt1 = 65_535;
 
     /// <summary>Runs the compressor command.</summary>
     /// <param name="args">
     /// Arguments after the executable name. Syntax:
-    /// <c>jx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]</c>.
+    /// <c>nx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]</c>.
     /// A positive <c>+N</c> argument skips N leading source bytes.
     /// </param>
     /// <returns>Zero on success; one after a user-facing argument or file error.</returns>
@@ -34,7 +35,7 @@ public static class Jx1
     {
         ArgumentNullException.ThrowIfNull(args);
         Console.WriteLine(
-            "JX1: Optimal data compressor v0.1 by Robbert van Dalen, "
+            "NX1: Optimal data compressor v0.1 by Robbert van Dalen, "
             + "based on ZX1 v1.5: Optimal data compressor by Einar Saukas");
 
         // Process optional parameters.
@@ -107,13 +108,13 @@ public static class Jx1
         else
         {
             return Cli.Usage(
-                "Usage: jx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]\n"
+                "Usage: nx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]\n"
                 + "  -f      Force overwrite of output file\n"
                 + "  -b      Compress backwards\n"
                 + "  -q      Quick non-optimal compression\n"
                 + "  -mN     Limit backreference offsets to N bytes\n"
                 + "  -lN     Split matches so no operation exceeds N bytes\n"
-                + "          (use -l65535 for the 68000 decoders)");
+                + "          (use -l65535 for the ST1 decoders)");
         }
         string inputName = args[index];
 

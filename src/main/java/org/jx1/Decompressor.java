@@ -16,7 +16,7 @@ import java.io.ByteArrayOutputStream;
  * once the stream is fully processed. {@link #decompress()} drains the whole stream in one call.
  *
  * <p>Malformed data trips Java assertions (enable with {@code -ea}); with assertions disabled,
- * behavior on malformed data is undefined, like the z80/68k decompressors.
+ * behavior on malformed data is undefined, like the z80 and ST1 decompressors.
  */
 public abstract class Decompressor {
 

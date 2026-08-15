@@ -1,7 +1,7 @@
 // ZX1 by Einar Saukas; C# port by OpenAI Codex under Robbert van Dalen's direction.
 // See LICENSE for the dual-license terms and full attribution.
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>
 /// Resumable ZX1 decompressor with bounded-memory ring-buffer output.

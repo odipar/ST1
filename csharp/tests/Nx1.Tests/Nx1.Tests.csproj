@@ -12,6 +12,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Jx1/Jx1.csproj" />
+    <ProjectReference Include="../../src/Nx1/Nx1.csproj" />
   </ItemGroup>
 </Project>

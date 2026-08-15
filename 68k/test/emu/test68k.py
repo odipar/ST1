@@ -60,7 +60,7 @@ def _binary(name):
 
 
 POS = [a for a in sys.argv[1:] if not a.startswith('-')]   # flags are not positional
-BIN = _binary(POS[0] if POS else 'jx1_68000.bin')
+BIN = _binary(POS[0] if POS else 'ST1.bin')
 CHUNKS = [int(c) for c in POS[1].split(',')] if len(POS) > 1 else [16, 1, 7, 127, 255, 4096]
 QUICK = '--quick' in sys.argv     # the whole matrix runs by default: with the
                                   # streams cached below, every combination
@@ -225,7 +225,7 @@ def run_oneshot(compressed: bytes, expected: bytes, src_bias: int = 0) -> None:
     uc = make_emu(compressed, src_bias)
     uc.reg_write(UC_M68K_REG_A0, SRC + src_bias)
     uc.reg_write(UC_M68K_REG_A1, DST)
-    for reg, canary in PRESERVED.items():          # jx1_decompress promises to
+    for reg, canary in PRESERVED.items():          # ST1_decompress promises to
         uc.reg_write(reg, canary)                  # leave these alone, a5 included
     sp_after = STACK_TOP - 256 + 4          # call() pushes the return address
     assert call(uc, ENTRY_DECOMPRESS) == 0

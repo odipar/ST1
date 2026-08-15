@@ -12,7 +12,7 @@ public final class Compressor {
     /**
      * Compressed stream, the delta needed for safe in-place decompression, and
      * the longest single operation it contains - which a caller targeting the
-     * 68000 decoders wants to be at most 65535.
+     * ST1 decoder wants to be at most 65535.
      */
     public record Result(byte[] output, int delta, int longestOp) {}
 

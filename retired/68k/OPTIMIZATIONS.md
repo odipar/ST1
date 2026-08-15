@@ -1,5 +1,9 @@
 # 68k optimization exploration (opt7 baseline)
 
+The `jx1_68000*` names below predate the ST1 branding and are preserved as
+historical experiment identifiers. The active Atari ST decoder is
+[ST1](../../68k/ST1.S).
+
 A themed, measured search for optimizations beyond `jx1_68000_opt7.S` (324 bytes),
 run as six parallel prototype efforts. Every variant below **assembled, passed the
 13-case differential harness at chunks 16/1/7/127 and the even/odd-destination

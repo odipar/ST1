@@ -3,7 +3,7 @@
 
 using System.Globalization;
 
-namespace Jx1;
+namespace Nx1;
 
 /// <summary>Shared command-line parsing and error-reporting helpers.</summary>
 internal static class Cli
