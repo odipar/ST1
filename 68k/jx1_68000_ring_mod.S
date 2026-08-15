@@ -1,6 +1,6 @@
 ; -----------------------------------------------------------------------------
-; jx1_68000_ring_mod.S - JX1: resumable ZX1 decompressor with a RING BUFFER
-;                        whose size is a multiple of one fixed budget (68000)
+; jx1_68000_ring_mod.S - JX1: resumable ZX1 decompressor with an aligned,
+;                        power-of-two RING BUFFER (68000)
 ;
 ; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas (data compression
 ; format, algorithm, and the original C/z80 decompressors). Code written by
@@ -10,59 +10,62 @@
 ; ZX1/jx1 (see LICENSE).
 ;
 ; This is jx1_68000_ring.S for callers who can promise that one fixed budget X
-; divides the ring buffer size - a 1024-byte buffer drained 16 bytes at a time,
-; say. X must not change between calls.
-; Read that file for what a ring buffer buys you; this one is 18 bytes smaller
-; and a few percent faster, and differs in exactly two ways:
+; divides one assembly-time power-of-two RING_SIZE - a 1024-byte buffer drained
+; 16 bytes at a time, say - and can align the buffer to RING_SIZE. X must not
+; change between calls. RING_SIZE defaults to 1024; override it with rmac's
+; -dRING_SIZE=<N> switch.
+;
+; Read the general file for what a ring buffer buys you. This version is
+; smaller and faster, and spends its stronger promises in three ways:
 ;
 ;   - every call but the last emits exactly the budget, never a short block,
 ;     so a caller wanting fixed-size pieces gets them for free
 ;   - YOU wrap the write pointer when the buffer fills; this version does not
+;   - no ring bounds are passed in registers: the aligned pointer's low bits
+;     are its position, and the compiled RING_SIZE supplies the wrap distance
 ;
-; 228 bytes, position-independent, one body: no macros, no tables, no
+; 232 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
 ; -----------------------------------------------------------------------------
-; DRAINING. The write pointer never wraps during a call, so a full buffer
-; shows up as a1 reaching the end bound - and you hand it back wrapped:
+; DRAINING. The write pointer never wraps during a call. On a continuing call,
+; a zero position means the pointer reached the end, so hand it back wrapped:
 ;
 ;       lea     stream,a0
-;       lea     ring,a1                 ; N bytes, any alignment
+;       lea     ring,a1                 ; RING_SIZE bytes, RING_SIZE-aligned
 ;       bsr     jx1_init
-;       lea     ring,a2                 ; the bounds are yours to hold: you
-;       lea     ring+N,a3               ; need them to drain anyway
 ;   .loop:
-;       moveq   #16,d4                  ; fixed X; N must be a multiple of it
+;       moveq   #16,d4                  ; fixed X; X must divide RING_SIZE
 ;       bsr     jx1_resume
 ;       moveq   #16,d6
 ;       sub.w   d4,d6                   ; bytes emitted = requested - unspent
 ;       movea.l a1,a4
 ;       suba.l  d6,a4                   ; first output byte for this call
 ;       ; consume [a4 .. a1)
-;       cmpa.l  a3,a1                   ; buffer full?
-;       bne.s   .more
-;       movea.l a2,a1                   ; yes: wrap it yourself, in the branch
-;                                       ; you already have
-;   .more:
 ;       tst.w   d1
+;       beq.s   .done                   ; final output is drained; no next call
+;       move.w  a1,d6
+;       and.w   #RING_SIZE-1,d6         ; aligned ring position
 ;       bne.s   .loop
+;       suba.l  #RING_SIZE,a1           ; end -> start; not on the hot path
+;       bra.s   .loop
+;   .done:
 ;
 ; -----------------------------------------------------------------------------
-; WHAT THE PROMISE BUYS. Because one fixed budget X divides N, the distance
-; from the start of the buffer to the write pointer is a multiple of X at every
-; entry: it starts at zero, a call leaving d1.w nonzero wrote exactly X bytes,
-; and a full buffer starts again at zero. So the room left is always a whole
-; number of budgets and never fewer than one, which means the
-; destination cannot reach the end of the buffer inside a call - and the entry
-; needs no room arithmetic and no clamp at all, only the copy ladder's own
-; work.
+; WHAT THE PROMISES BUY. Because one fixed budget X divides RING_SIZE, the
+; distance from the start of the buffer to the write pointer is a multiple of X
+; at every entry: it starts at zero, a call leaving d1.w nonzero wrote exactly
+; X bytes, and a full buffer starts again at zero. The room left is therefore a
+; whole number of budgets and never fewer than one. The destination cannot
+; reach the end inside a call, so entry needs no room arithmetic or clamp.
 ;
-; A MATCH SOURCE THAT WOULD RUN OFF THE END STILL SPLITS THE COPY, so the
-; rolled-out copy ladder needs no bounds test. The source is recomputed from
-; the destination for each segment (source = dst - offset, plus N when that
-; falls below the buffer) rather than carried, which also makes resuming a
-; match cost nothing extra.
+; Power-of-two alignment makes the low bits of a1 the destination position.
+; Subtracting the offset from that position says whether the source wrapped.
+; An unwrapped source is behind the destination and has even more room, so it
+; can jump directly to the copy. A wrapped source uses the negative result as
+; its room and splits only when necessary. The source is recomputed for every
+; segment rather than carried, so resuming a match still costs no extra state.
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. There is no context block to allocate, align or
@@ -83,17 +86,15 @@
 ;
 ;   in and out   a0.l a1.l d0.b      the state; leave it alone between calls
 ;                d1.w d3.w
-;   in           a2.l a3.l           ring bounds: first byte, and one past the
-;                                    last. Read-only, and come back unchanged
 ;   in           d4.w                this call's budget, spent by the call
-;   CLOBBERED    d4.w d5.l d6.l      no value in these survives a call
-;                a4.l
-;   untouched    d2 d7 a5 a6         and the stack beyond the return address
+;   CLOBBERED    d2.l d4.w d5.l d6.l no value in these survives a call
+;   untouched    d7 a2 a3 a4 a5 a6   and the stack beyond the return address
 ;
-; d5 and d6 are working registers throughout - d5 carries the segment length
-; and the copy-ladder index, d6 the gamma value and the room arithmetic - so
-; treat both as gone across a call. d1 itself is the result: zero means done,
-; nonzero means more.
+; During a match, a0 is borrowed as the source pointer and d2 saves the real
+; compressed-input position. d5 carries the segment length and copy-ladder
+; index, and d6 the gamma value and ring-position arithmetic, so treat all
+; three data registers as gone across a call. a2-a4 are never touched. d1
+; itself is the result: zero means done, nonzero means more.
 ; Only d4's low word is spent, but it is spent, not refilled: pass the budget
 ; again on the next call.
 ;
@@ -107,13 +108,14 @@
 ;      splits any longer match; a stream compressed without it can exceed the
 ;      limit, and would decode short here with no error
 ;   2. the budget in d4.w is 1..65535 and is the same fixed X on every call
-;   3. the ring buffer size N is 1..65535. The format's offsets stop at 32512,
-;      so a larger ring could never be referenced anyway
-;   4. no back-reference offset exceeds N, which is what compressing with
-;      -mN guarantees
-;   5. X DIVIDES N. Everything above rests on both the fixed-X and divisibility
-;      promises: changing X between calls or using an X that does not divide N
-;      can run the destination past the end of the buffer
+;   3. RING_SIZE is an assembly-time power of two in 1..32768, and the buffer
+;      starts at an address aligned to RING_SIZE. The assembler rejects other
+;      sizes. The format's offsets stop at 32512, so 32768 covers all of them
+;   4. no back-reference offset exceeds RING_SIZE, which is what compressing
+;      with jx1 -m<RING_SIZE> guarantees
+;   5. X DIVIDES RING_SIZE. Everything above rests on the fixed-X, alignment,
+;      power-of-two and divisibility promises. Violating any of them can read
+;      or write beyond the ring
 ;
 ; TRUSTED INPUT ONLY. Nothing here is validated: not the stream, not the end
 ; of the input, not the destination, not the parameters. A malformed or
@@ -124,6 +126,22 @@
 ; you did not produce yourself, validate the stream and its decompressed
 ; length before calling in, or decompress it somewhere it cannot do harm.
 ; -----------------------------------------------------------------------------
+
+; Assembly-time configuration. rmac command-line definitions take precedence,
+; for example: rmac -dRING_SIZE=256 ... jx1_68000_ring_mod.S
+        .if     !(^^defined RING_SIZE)
+RING_SIZE      equ     1024
+        .endif
+        .if     RING_SIZE < 1
+        .error  "RING_SIZE must be a power of two in 1..32768"
+        .endif
+        .if     RING_SIZE > 32768
+        .error  "RING_SIZE must be a power of two in 1..32768"
+        .endif
+        .if     RING_SIZE & (RING_SIZE-1)
+        .error  "RING_SIZE must be a power of two in 1..32768"
+        .endif
+RING_MASK      equ     RING_SIZE-1
 
 ; Jump table: intentionally bra.w so the slots stay 4 bytes (base+0/4).
 ; There is no one-shot entry: a bounded buffer has to be drained by the
@@ -149,15 +167,13 @@ entry_done:
         rts                             ; d1 = 0: keep returning "fully processed"
 
 ; -----------------------------------------------------------------------------
-; jx1_resume: a0/a1/d0/d1/d3 = the state, d4.w = this call's budget,
-;             a2/a3 = the ring buffer's first byte and one past its last.
-;             a2/a3 are read-only and come back unchanged.
-; Emits at most d4 bytes, and at most as many as fit before the end of the
-; buffer. Returns d1.w = 0 when the stream is fully processed, nonzero when
-; there is more. a1 is the caller's cue: everything between its previous value and its
-; new one is fresh output, and a1 reaching a3 means the buffer is full.
-; Wrap a1 back to a2 yourself before the next call - this entry does not do
-; it for you.
+; jx1_resume: a0/a1/d0/d1/d3 = the state, d4.w = this call's budget.
+; No bounds are passed: RING_SIZE is compiled in and a1's ring is aligned to
+; it. Emits at most d4 bytes. Returns d1.w = 0 when the stream is fully
+; processed, nonzero when there is more. Everything between a1's previous and
+; new values is fresh output. On a continuing call, position zero means a1
+; reached the end; wrap it back by subtracting RING_SIZE before the next call.
+; a2-a4 are untouched.
 ; Java: Decompressor.resume().
 ; -----------------------------------------------------------------------------
 jx1_resume:
@@ -182,23 +198,26 @@ budget_fits:
 ; Only a match source running into the end of the buffer can split a copy;
 ; the destination never can, so literals always copy in one pass.
 ; -----------------------------------------------------------------------------
-        movea.l a1,a4                   ; match: source = dst - lastOffset,
-        suba.w  d3,a4                   ; brought back into the buffer if it
-                                        ; falls below the start (Java:
-                                        ; readBufferByte()'s index wrap)
-        cmpa.l  a2,a4
-        bcc.s   source_ready
-        suba.l  a2,a4
-        adda.l  a3,a4
-source_ready:
-        move.l  a3,d6
-        sub.l   a4,d6                   ; room before the source wraps (>= 1)
+        move.l  a0,d2                   ; borrow a0 as the match source while
+        movea.l a1,a0                   ; d2 holds the compressed-input pointer
+        suba.w  d3,a0                   ; raw source = dst - lastOffset
+        move.w  a1,d6
+        and.w   #RING_MASK,d6           ; destination position in aligned ring
+        sub.w   d3,d6                   ; minus offset; carry means it wrapped
+        bcc.s   copy                    ; unwrapped source cannot hit the end
+                                        ; before the destination does
+        neg.w   d6                      ; wrapped: room = offset - position
+        .if     RING_SIZE = 32768
+        suba.w  #$8000,a0               ; subtracting -32768 adds 32768 safely
+        .else
+        adda.w  #RING_SIZE,a0           ; raw source + N, back into the ring
+        .endif
         cmp.w   d5,d6                   ; word, as above: the room is at most N
         bcc.s   copy
         move.w  d6,d5                   ; this segment stops at the wrap
         bra.s   copy
 literal_source:
-        movea.l a0,a4                   ; literals copy straight from the input
+                                        ; literals copy straight from the input
 copy:                                   ; Java: writeByte(...) - n moves total:
         sub.w   d5,d1                   ; a partial first pass of n&7 entered
         sub.w   d5,d4                   ; mid-ladder, then n>>3 full passes off
@@ -209,19 +228,19 @@ copy:                                   ; Java: writeByte(...) - n moves total:
         neg.w   d5                      ; index = -2*(n&7)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
-        move.b  (a4)+,(a1)+             ; 8 fully rolled-out byte moves; entry
-        move.b  (a4)+,(a1)+             ; at ladder_end-2k copies exactly k
-        move.b  (a4)+,(a1)+
-        move.b  (a4)+,(a1)+
-        move.b  (a4)+,(a1)+
-        move.b  (a4)+,(a1)+
-        move.b  (a4)+,(a1)+
-        move.b  (a4)+,(a1)+
+        move.b  (a0)+,(a1)+             ; 8 fully rolled-out byte moves; entry
+        move.b  (a0)+,(a1)+             ; at ladder_end-2k copies exactly k
+        move.b  (a0)+,(a1)+
+        move.b  (a0)+,(a1)+
+        move.b  (a0)+,(a1)+
+        move.b  (a0)+,(a1)+
+        move.b  (a0)+,(a1)+
+        move.b  (a0)+,(a1)+
 ladder_end:
         dbf     d6,ladder               ; full 8-move passes for big copies
         tst.w   d3
-        bpl.s   resume_op               ; matches consume no input here;
-        movea.l a4,a0                   ; literals do
+        bmi.s   resume_op               ; literals consumed input in place;
+        movea.l d2,a0                   ; matches restore compressed input
 
 resume_op:                              ; the loop guards live here, below the
         tst.w   d1                      ; copy, so a call entering mid-op skips

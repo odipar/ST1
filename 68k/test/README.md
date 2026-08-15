@@ -16,15 +16,14 @@ measure decode time with the system's 200 Hz tick:
 * [jx1_hatari.S](jx1_hatari.S) — [../jx1_68000.S](../jx1_68000.S), the linear
   decompressor
 * [jx1_hatari_ring.S](jx1_hatari_ring.S) — the ring decompressors, streaming
-  each corpus through several ring/chunk shapes. It builds twice:
-  `-dRINGMOD=0` for [../jx1_68000_ring.S](../jx1_68000_ring.S) with dividing
-  and non-dividing shapes, and `-dRINGMOD=1` for
-  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S) with the dividing shapes
-  its contract requires. Nothing is accumulated: each call's output is
-  compared against the expected image as it is drained, and the wrap is
-  detected the way the interface intends (`a1 == a3`). The point of the
-  feature is visible here — 32000 bytes decompressed through a 256-byte
-  buffer.
+  each corpus through several ring/chunk shapes. It builds once with
+  `-dRINGMOD=0` for [../jx1_68000_ring.S](../jx1_68000_ring.S), including
+  dividing and non-dividing shapes, and twice with `-dRINGMOD=1` for
+  [../jx1_68000_ring_mod.S](../jx1_68000_ring_mod.S), at compile-time
+  `RING_SIZE` values 256 and 1024. Nothing is accumulated: each call's output
+  is compared against the expected image as it is drained, and wrap is
+  detected against the harness's saved ring end. The point of the feature is
+  visible here — 32000 bytes decompressed through a 256-byte buffer.
 
 ```sh
 mvn compile                 # in the repo root: the compressor makes the streams
@@ -33,8 +32,9 @@ HATARI=/path/to/hatari TOS=/path/to/tos.img 68k/test/run.sh
 
 `run.sh` generates the corpora ([gendata.py](gendata.py) — the same seven the
 emulator rig uses, same RNG stream, plus a `-m256` stream per corpus for the
-ring), assembles both programs with `rmac -p +o3`, and runs them under Hatari
-headless with console output on stdout.
+ring), assembles the linear, general-ring and two fixed-ring variants with
+`rmac -p +o3`, and runs them under Hatari headless with console output on
+stdout.
 
 > **On `+o3`:** it used to matter — `jx1_68000.S` wrote
 > `move.l d1,ctx_packed(a5)` with `ctx_packed = 0`, which vasm folded to
@@ -64,11 +64,11 @@ the cycle counts below are spent on. Note `maxoffset` at `-m256` *expands*
 (33121 > 33012): a 256-byte window on random data is nearly all literals,
 which is exactly the ratio cost of a small ring.
 
-Both harnesses fill **the clobbered registers with junk before every
-`jx1_resume`** — `d5`, `d6` and `a4`, which is all a caller may scribble on
-now that the parse state lives in `a0`/`a1` and `d0`/`d1`/`d3` between calls.
+Both harnesses fill **the decoder-specific clobbered registers with junk
+before every `jx1_resume`**. The linear path poisons `d5`/`d6`/`a4`, the
+general ring poisons `d5`/`d6`/`a2`, and `ring_mod` poisons `d2`/`d5`/`d6`.
 The ABI promises nothing about their incoming values, so this is what a legal
-caller may look like, and a decoder that reads their upper words is broken.
+caller may look like, and a decoder that reads stale upper words is broken.
 That check is what a partial-register bug in both ring decoders escaped for
 want of, until an external audit found it.
 
@@ -97,17 +97,19 @@ matters:
 | R1000/16 | 8 | short calls at the wrap (and a ring that is not a power of two) |
 | R1024/127 | 8 | short calls at the wrap |
 
-`jx1_68000_ring_mod.S` requires the chunk to divide the ring, so its build
-runs only dividing shapes — 256/16, 256/64, 1000/125, 1016/127, 1024/16,
-1024/64, seven corpora, 42 configurations — and every one of them must report
-`OKf`. It does, which is the fixed-size-output property confirmed on
+`jx1_68000_ring_mod.S` is assembled for a power-of-two `RING_SIZE`, requires
+the buffer to have matching alignment, and requires one fixed chunk X to
+divide that size. The harness builds N=256 and N=1024 and runs X=16 and X=64
+for each: seven corpora, 28 configurations. Every one must report `OKf`; this
+confirms the fixed-size-output property for multiple compiled sizes on
 hardware.
 
-Each call that leaves `d1.w` nonzero must produce exactly the chunk size — unless it ran
-into the end of the buffer, which the harness requires to coincide with the
-write pointer reaching `a3`, and which it rejects outright when the chunk
-divides the ring. The result is reported per shape: **`OKf`** when every call
-was a full chunk, **`OKv`** when short calls appeared at the wrap.
+Each call that leaves `d1.w` nonzero must produce exactly the chunk size —
+unless the general decoder ran into the end of the buffer, which the harness
+requires to coincide with its saved end (the decoder's preserved `d2`). The
+fixed decoder rejects such a short call outright. The result is reported per
+shape: **`OKf`** when every call was a full chunk, **`OKv`** when short calls
+appeared at the wrap.
 
 ```
 text      R256/16=OKf R256/127=OKv R1000/16=OKf R1024/16=OKf R1024/127=OKf
@@ -128,6 +130,11 @@ count, so the host can convert without assuming anything about the clock. A
 200 Hz tick is 5 ms; at the ST's 8 MHz that is 40000 cycles. Cycles are per
 full decode of one corpus: "stream" bytes in, "output" bytes out, at chunk
 size X.
+
+The model tables below are the recorded optimization history. They predate
+the current general ring's packed N and the fixed ring's compile-time aligned
+`RING_SIZE`; current raw measurements follow that history at the end of this
+section, without claiming a model that has not been regenerated for them.
 
 | corpus | stream | output | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|
@@ -163,8 +170,8 @@ several times the buffer it streams through — lands in the same band,
 
 `jx1_68000_ring_mod.S`, which requires the chunk to divide the ring and
 spends that on a cheaper entry, on the same shape. Its model column includes
-**the caller's wrap** (`cmpa.l a3,a1 / bne.s / movea.l a2,a1`), since that
-decoder does not wrap for you and the timed loop therefore executes it:
+**the caller's wrap**, since that decoder does not wrap for you and the timed
+loop therefore executes it:
 
 | corpus | stream | output | ring | X | model | ST measured | ST vs model |
 |---|---|---|---|---|---|---|---|
@@ -254,13 +261,16 @@ rather than 127, the same two bytes, worth **+4.2% to +16.3%** (mean +12.4%)
 under the model. The resumable entry is unchanged, so the timed rows above do
 not show it.
 
-Finally, the last offset absorbed the operation state without absorbing the
-remaining count: negative `d3.w` means LITERALS and positive means MATCH;
-`d1.w = 0` together with `d3.w = +1/0` means START/DONE. That frees `d2`
-without adding instructions to the hot paths. Once DONE was normalized to
-`d1.w = 0`, the separate 0/1 result in `d5` was redundant too; testing `d1`
-removes one `moveq` from every non-final call. The result is 6 bytes off every
-decoder, exactly 4 cycles off each suspension, and 2 cycles off DONE:
+Finally, at that stage, the last offset absorbed the operation state without
+absorbing the remaining count: negative `d3.w` means LITERALS and positive
+means MATCH; `d1.w = 0` together with `d3.w = +1/0` means START/DONE. That
+made `d2` available without adding instructions to the hot paths. The current
+register-reduction pass now uses it as the general ring's sole end bound and
+as transient match scratch in `ring_mod`; it remains untouched by the linear
+decoder. Once DONE was normalized to `d1.w = 0`, the separate 0/1 result in
+`d5` was redundant too; testing `d1` removes one `moveq` from every non-final
+call. The result at this historical step was 6 bytes off every decoder,
+exactly 4 cycles off each suspension, and 2 cycles off DONE:
 
 | | before | after | gain |
 |---|---|---|---|
@@ -269,7 +279,26 @@ decoder, exactly 4 cycles off each suspension, and 2 cycles off DONE:
 | ring 1024/16 | 151/193/148/183/174/162/161 | 150/192/147/181/173/161/160 | +0.5% to +1.1% |
 | ring_mod 1024/16 | 145/190/141/175/166/155/153 | 145/189/140/173/165/154/152 | +0.0% to +1.1% |
 
-**The model holds.** Real ST decode time runs **+2.7% to +6.3%** above the
+### Current reduced-register ring ABIs
+
+The latest complete `run.sh` pass measures the new ABIs below. Values are raw
+200 Hz ticks in corpus order
+`text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`; every correctness
+shape in the same executables also passed.
+
+| decoder | N/X | ST ticks |
+|---|---|---|
+| general ring | 1024/16 | 147/189/144/178/169/158/160 |
+| `ring_mod` | 256/16 | 149/192/145/182/170/158/156 |
+| `ring_mod` | 1024/16 | 146/188/142/175/167/155/156 |
+
+At the directly comparable 1024/16 shape, the fixed decoder remains faster
+on every corpus, by **0.5% to 2.5%**, while eliminating all persistent bound
+registers. The general decoder's only persistent bound is now `d2`; N shares
+`d1` with the remaining count, and `a3`/`a4` stay untouched.
+
+**For the modeled stages, the model holds.** Real ST decode time runs **+2.7%
+to +6.3%** above the
 idealized 68000 cycle counts (mean +4.4%) — the gap is interrupt service and
 video-DMA bus contention, not decoder behaviour. For scale, the harness's own
 reference `dbf` loop, whose cycle count is exact by construction, measures

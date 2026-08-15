@@ -160,7 +160,9 @@ def main():
                 ('jx1_68000.bin', lambda s: b.run_linear(s), 'one-shot'),
                 ('jx1_68000.bin', lambda s: b.run_linear(s, 16), 'X=16'),
                 ('jx1_68000_ring.bin', lambda s: b.run_ring(s, 32512, 16), 'ring 32512/16'),
-                ('jx1_68000_ring_mod.bin', lambda s: b.run_ring(s, 32512, 16), 'ring_mod 32512/16')):
+                ('jx1_68000_ring_mod_32768.bin',
+                 lambda s: b.run_ring(s, 32768, 16, True),
+                 'ring_mod 32768/16')):
             t.BIN = t._binary(binary)
             try:
                 ok = run(stream) == data

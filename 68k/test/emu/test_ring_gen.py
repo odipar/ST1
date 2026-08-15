@@ -1,8 +1,9 @@
-"""Differential test for the zero/nonzero-result ring decompressor.
+"""Differential test for the general zero/nonzero-result ring decompressor.
 
 The caller drains after every call and spots the wrap itself: the write
-pointer never wraps mid-call, so "a1 == ring end" means the buffer is full
-and the next call restarts at the beginning.
+pointer never wraps mid-call, so "a1 == d2" means the buffer is full.  Tests
+exercise both legal handoffs: caller-wrapped a1, and end-valued a1 for the
+decoder to wrap on its next entry.
 """
 import sys, importlib.util
 from pathlib import Path
@@ -31,15 +32,10 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# What a caller may still pass junk in. d0/d1/d3 carry the parse state and d4 is
-# the budget, so the clobber set is what is left.
-CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6, UC_M68K_REG_A4)
+# d2 is the sole, preserved ring bound.  a2 is the decoder's copy pointer;
+# a3/a4 are deliberately canaried below because the new ABI frees both.
+CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6, UC_M68K_REG_A2)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
-# jx1_68000_ring.S wraps a full buffer itself at the next entry; ring_mod
-# requires the caller to. Both are legal callers of the general ring, and only
-# the caller-wrapped one exercises ring_mod - so the general ring is run both
-# ways, or its own wrap code is never executed here at all.
-DECODER_WRAPS = 'ring_mod' not in (POS[0] if POS else 'jx1_68000_ring.bin')
 
 def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     uc = t.make_emu(compressed)
@@ -47,11 +43,9 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     stray = []                                      # ring, checked at the end
 
     def guard(u, ty, addr, size, val, d):
-        # The whole [addr, addr+size) interval, against exact regions: a write
-        # that starts inside the ring and ends past it is still a write past it,
-        # and the context is ctx_size bytes, not a comfortable 64.
-        # There is no context block any more, so the ring and the stack are
-        # the only places a write may land at all.
+        # Check the whole [addr, addr+size) interval: a write that starts inside
+        # the ring and ends past it is still out of bounds. There is no context
+        # block, so only the ring and the call stack may be written.
         for lo, hi in ((ring, ring + n), (t.STACK_TOP - 0x4000, t.STACK_TOP)):
             if lo <= addr and addr + size <= hi:
                 return
@@ -61,11 +55,12 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
     read_high = t.track_source_reads(uc, t.SRC)
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
+    uc.reg_write(UC_M68K_REG_D2, ring + n)           # sole ring bound, present
+                                                     # when init derives N
     t.call(uc, ENTRY_INIT)
-    uc.reg_write(UC_M68K_REG_A2, ring)              # ring bounds are parameters
-    uc.reg_write(UC_M68K_REG_A3, ring + n)
+    uc.reg_write(UC_M68K_REG_A3, 0x00030234)
+    uc.reg_write(UC_M68K_REG_A4, 0x00040234)
     uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
-    uc.reg_write(UC_M68K_REG_D2, 0xD2D21234)
     uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
 
     out = bytearray()
@@ -78,8 +73,13 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
         r = t.call(uc, ENTRY_RESUME)            # parameter, not state
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
-        assert dst >= prev, f'write pointer went backwards inside a call: {dst} < {prev}'
-        out += uc.mem_read(prev, dst - prev)
+        emitted = dst - prev
+        assert 0 <= emitted <= chunk, \
+            f'emitted {emitted} bytes with budget {chunk}'
+        if r != 0 and emitted < chunk:
+            assert dst == ring + n, \
+                f'short continuing call stopped at {dst:#x}, before ring end'
+        out += uc.mem_read(prev, emitted)
         if dst == ring + n:                     # full buffer
             if caller_wrap:                     # hand it back wrapped, as
                 uc.reg_write(UC_M68K_REG_A1, ring)   # ring_mod requires...
@@ -87,9 +87,10 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         else:                                   # let the decoder wrap on entry
             prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_A2) == ring, 'a2 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A3) == ring + n, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_D2) == 0xD2D21234, 'd2 clobbered'
+        assert uc.reg_read(UC_M68K_REG_D1) >> 16 == n, 'packed N in d1.high changed'
+        assert uc.reg_read(UC_M68K_REG_D2) == ring + n, 'd2 bound clobbered'
+        assert uc.reg_read(UC_M68K_REG_A3) == 0x00030234, 'a3 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A4) == 0x00040234, 'a4 clobbered'
         if r == 0:
             break
         assert r > 0, f'bad remaining count {r}'
@@ -114,7 +115,7 @@ def main():
             if _too_slow(data, n, chunk):
                 continue
             compressed = t.java_compress(data, min(n, 32512))
-            for caller_wrap in ((True, False) if DECODER_WRAPS else (True,)):
+            for caller_wrap in (True, False):
                 try:
                     out = run_ring(compressed, data, n, chunk, t.DST + 11,
                                    caller_wrap)     # odd base, clear of the
@@ -127,7 +128,7 @@ def main():
                     failures += 1
         print(f'{"OK  " if not failures else "    "}{name:11s} '
               f'({len(data)} bytes through {len(sizes)} ring/chunk shapes'
-              f'{", both wrap modes" if DECODER_WRAPS else ""})')
+              ', both wrap modes)')
     print('ALL RING2 TESTS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0
 

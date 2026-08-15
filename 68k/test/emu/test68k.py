@@ -43,12 +43,25 @@ def _binary(name):
         if not out.exists():
             raise SystemExit(f'--binary given but no {out}')
         return _ASSEMBLED.setdefault(name, out.read_bytes())
-    src = here.parent.parent / (Path(name).stem + '.S')
+    stem = Path(name).stem
+    defines = []
+    mod = re.fullmatch(r'jx1_68000_ring_mod(?:_(\d+))?', stem)
+    if mod:
+        # ring_mod's size is an assembly-time contract.  Giving generated
+        # binaries the size in their name lets one process test several
+        # independently assembled variants without ever confusing their ABIs.
+        ring_size = int(mod.group(1) or 1024)
+        if ring_size < 1 or ring_size > 32768 or ring_size & (ring_size - 1):
+            raise SystemExit(f'invalid ring_mod RING_SIZE {ring_size}')
+        stem = 'jx1_68000_ring_mod'
+        defines.append(f'-dRING_SIZE={ring_size}')
+    src = here.parent.parent / (stem + '.S')
     if not src.exists():
         raise SystemExit(f'no {src}')
     with tempfile.TemporaryDirectory() as d:
         target = Path(d, name)
-        r = subprocess.run(['rmac', '-m68000', '-fr', '+o3', '-o', str(target), str(src)],
+        r = subprocess.run(['rmac', '-m68000', '-fr', '+o3', *defines,
+                            '-o', str(target), str(src)],
                            capture_output=True, text=True)
         if r.returncode:
             raise SystemExit(r.stdout + r.stderr)

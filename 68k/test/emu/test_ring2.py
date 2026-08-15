@@ -1,8 +1,9 @@
-"""Differential test for the zero/nonzero-result ring decompressor.
+"""Differential test for the compile-time power-of-two ring decompressor.
 
 The caller drains after every call and spots the wrap itself: the write
 pointer never wraps mid-call, so "a1 == ring end" means the buffer is full
-and the next call restarts at the beginning.
+and the caller restarts at the beginning.  Each N is assembled into a distinct
+binary and each ring base is aligned to that N, as the decoder requires.
 """
 import sys, importlib.util
 from pathlib import Path
@@ -31,10 +32,22 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_D6, UC_M68K_REG_D0, UC_M68K_REG_D1,
                                 UC_M68K_REG_D2, UC_M68K_REG_D4,
                                 UC_M68K_REG_A6, UC_M68K_REG_D3, UC_M68K_REG_D7)
-# What a caller may still pass junk in. d0/d1/d3 carry the parse state and d4 is
-# the budget, so the clobber set is what is left.
-CLOBBERED = (UC_M68K_REG_D5, UC_M68K_REG_D6, UC_M68K_REG_A4)
+# The fixed ring has no bound registers.  d2 is the match-time saved input
+# pointer; a2-a4 are all promised untouched.
+CLOBBERED = (UC_M68K_REG_D2, UC_M68K_REG_D5, UC_M68K_REG_D6)
 ENTRY_INIT, ENTRY_RESUME = t.CODE + 0, t.CODE + 4
+
+
+def binary_name(n):
+    return f'jx1_68000_ring_mod_{n}.bin'
+
+
+def aligned_ring(n):
+    # Leave room for the lower canary and for a complete N-byte ring in the
+    # mapped destination area.  N is a power of two.
+    ring = (t.DST + 8 + n - 1) & -n
+    assert ring % n == 0 and ring + n + 8 <= t.DST + 0x20000
+    return ring
 
 def run_ring(compressed, expected, n, chunk, ring):
     uc = t.make_emu(compressed)
@@ -42,11 +55,9 @@ def run_ring(compressed, expected, n, chunk, ring):
     stray = []                                      # ring, checked at the end
 
     def guard(u, ty, addr, size, val, d):
-        # The whole [addr, addr+size) interval, against exact regions: a write
-        # that starts inside the ring and ends past it is still a write past it,
-        # and the context is ctx_size bytes, not a comfortable 64.
-        # There is no context block any more, so the ring and the stack are
-        # the only places a write may land at all.
+        # Check the whole [addr, addr+size) interval: a write that starts inside
+        # the ring and ends past it is still out of bounds. There is no context
+        # block, so only the ring and the call stack may be written.
         for lo, hi in ((ring, ring + n), (t.STACK_TOP - 0x4000, t.STACK_TOP)):
             if lo <= addr and addr + size <= hi:
                 return
@@ -54,13 +65,14 @@ def run_ring(compressed, expected, n, chunk, ring):
 
     uc.hook_add(UC_HOOK_MEM_WRITE, guard)
     read_high = t.track_source_reads(uc, t.SRC)
+    assert n & (n - 1) == 0 and ring % n == 0
     uc.reg_write(UC_M68K_REG_A0, t.SRC)
     uc.reg_write(UC_M68K_REG_A1, ring)
     t.call(uc, ENTRY_INIT)
-    uc.reg_write(UC_M68K_REG_A2, ring)              # ring bounds are parameters
-    uc.reg_write(UC_M68K_REG_A3, ring + n)
+    uc.reg_write(UC_M68K_REG_A2, 0x00020234)
+    uc.reg_write(UC_M68K_REG_A3, 0x00030234)
+    uc.reg_write(UC_M68K_REG_A4, 0x00040234)
     uc.reg_write(UC_M68K_REG_D7, 0xFEEDFACE)
-    uc.reg_write(UC_M68K_REG_D2, 0xD2D21234)
     uc.reg_write(UC_M68K_REG_A6, 0xCAFEBABE)
 
     out = bytearray()
@@ -73,17 +85,22 @@ def run_ring(compressed, expected, n, chunk, ring):
         uc.reg_write(UC_M68K_REG_D4, chunk)     # the budget is a per-call
         r = t.call(uc, ENTRY_RESUME)            # parameter, not state
         dst = uc.reg_read(UC_M68K_REG_A1)      # a1 is the write pointer now
-        assert dst >= prev, f'write pointer went backwards inside a call: {dst} < {prev}'
-        out += uc.mem_read(prev, dst - prev)
-        if dst == ring + n:                     # full: the caller wraps the write
-            uc.reg_write(UC_M68K_REG_A1, ring)  # pointer, which this decoder
-            prev = ring                         # requires of it (the general ring
-        else:                                   # wraps for you - doing it here
-            prev = dst                          # too is a no-op there)
+        emitted = dst - prev
+        assert 0 <= emitted <= chunk, \
+            f'emitted {emitted} bytes with budget {chunk}'
+        if r != 0:
+            assert emitted == chunk, \
+                f'short continuing call emitted {emitted} of fixed {chunk}'
+        out += uc.mem_read(prev, emitted)
+        if dst == ring + n:                     # full: this ABI requires the
+            uc.reg_write(UC_M68K_REG_A1, ring)  # caller to wrap the write pointer
+            prev = ring
+        else:
+            prev = dst
         assert not stray, f'wrote outside the ring at {[hex(a) for a in stray[:3]]}'
-        assert uc.reg_read(UC_M68K_REG_A2) == ring, 'a2 clobbered'
-        assert uc.reg_read(UC_M68K_REG_A3) == ring + n, 'a3 clobbered'
-        assert uc.reg_read(UC_M68K_REG_D2) == 0xD2D21234, 'd2 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A2) == 0x00020234, 'a2 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A3) == 0x00030234, 'a3 clobbered'
+        assert uc.reg_read(UC_M68K_REG_A4) == 0x00040234, 'a4 clobbered'
         if r == 0:
             break
         assert r > 0, f'bad remaining count {r}'
@@ -98,13 +115,15 @@ def run_ring(compressed, expected, n, chunk, ring):
     return bytes(out)
 
 def main():
-    # every shape must satisfy N % X == 0 (the decompressor's requirement);
-    # 511/7, 1000/125, 1016/127 and 33000/8 keep non-power-of-two rings in
-    sizes = [(1024, 16), (1024, 64), (1024, 1), (4096, 16), (32512, 16),
-             (32512, 64), (256, 16), (256, 64), (512, 64), (511, 7),
-             (1000, 125), (1016, 127), (33000, 8), (3, 1), (2, 1), (1, 1),
-             (32512, 32512), (4096, 4096), (1024, 1024)]   # budgets past 127
-    assert all(n % c == 0 for n, c in sizes), 'a shape violates N % X == 0'
+    # Every N is a separately assembled power-of-two variant and every fixed
+    # X divides it.  Tiny sizes pin modular arithmetic; 32768 pins the largest
+    # supported compile-time ring and budgets beyond moveq's range.
+    sizes = [(1, 1), (2, 1), (2, 2), (256, 1), (256, 16), (256, 64),
+             (256, 256), (512, 64), (1024, 16), (1024, 64), (1024, 1024),
+             (4096, 16), (4096, 4096), (32768, 16), (32768, 256),
+             (32768, 32768)]
+    assert all(n & (n - 1) == 0 and n % c == 0 for n, c in sizes), \
+        'a shape violates the power-of-two/fixed-divisor contract'
     failures = 0
     for name, data, m in t.testcases():
         for n, chunk in sizes:
@@ -112,8 +131,8 @@ def main():
                 continue
             compressed = t.java_compress(data, min(n, 32512))
             try:
-                out = run_ring(compressed, data, n, chunk, t.DST + 11)  # odd base,
-                                       # clear of the canary below it
+                t.BIN = t._binary(binary_name(n))
+                out = run_ring(compressed, data, n, chunk, aligned_ring(n))
                 assert out == data, (f'{len(out)} bytes, first diff at '
                                      f'{next((i for i, (a, b) in enumerate(zip(out, data)) if a != b), len(out))}')
             except Exception as e:
