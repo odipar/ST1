@@ -68,9 +68,9 @@ where the output goes and in what the caller has to promise:
 
 | File | Code | Output | Entries |
 |---|---|---|---|
-| [jx1_68000.S](68k/jx1_68000.S) | 232 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
-| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 274 B | an arbitrarily placed caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
-| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 232 B | a compile-time power-of-two ring, aligned to N, when N is a multiple of one fixed budget X | `jx1_init`, `jx1_resume` |
+| [jx1_68000.S](68k/jx1_68000.S) | 220 B | a linear buffer, which must hold the whole output — it *is* the match window | `jx1_init`, `jx1_decompress`, `jx1_resume` |
+| [jx1_68000_ring.S](68k/jx1_68000_ring.S) | 266 B | an arbitrarily placed caller-supplied ring of N bytes — memory bounded by N, not by the output | `jx1_init`, `jx1_resume` |
+| [jx1_68000_ring_mod.S](68k/jx1_68000_ring_mod.S) | 224 B | a compile-time power-of-two ring, aligned to N, when N is a multiple of one fixed budget X | `jx1_init`, `jx1_resume` |
 
 All three are verified byte-identical against Java-compressed streams under
 cycle-measured emulation and on real 68000 hardware (Atari ST — see
@@ -80,7 +80,7 @@ budget of output.
 [68k/jx1_68000.S](68k/jx1_68000.S) is the one to reach for unless you need
 bounded memory:
 
-* 232 bytes of position-independent code, and no context block at all
+* 220 bytes of position-independent code, and no context block at all
 * one body — no macros, no tables, no self-modifying code; runs from ROM
 * jump-table ABI: base+0 `jx1_init`, +4 `jx1_decompress`, +8 `jx1_resume`
 * assumptions (undefined when violated): no single literal run or match
@@ -171,9 +171,11 @@ as the copy source and touch data registers contiguously from `d0` through
 `d5`; there are no register-number gaps. Only the general ring extends the
 two word-sized state registers into their high words for packed metadata.
 
-`d4` and `d5` are working registers throughout — `d4` carries the segment
-length and the copy-ladder index, `d5` the gamma value — so treat both as
-gone across a call. The remaining count already in `d1` doubles as the result.
+`d4` and `d5` are working registers throughout — `d4` carries the gamma seed,
+segment length and full-pass count, while `d5` carries gamma values, the
+copy-ladder dispatch index and the rings' position/room arithmetic — so treat
+both as gone across a call. The remaining count already in `d1` doubles as
+the result.
 
 `d2` holds the last offset and operation state together: its magnitude is the
 offset, and its sign distinguishes LITERALS from MATCH at no extra cost. It
@@ -249,7 +251,7 @@ Because N is at most 65535, both destination room and position are exact
 modulo 65536 even when the ring crosses a 64-K boundary. The borrow from
 `position-offset` identifies a wrapped source; adding zero-extended N to its
 raw address brings it back into the ring. Packing the last bound into existing
-state costs no persistent register and makes the general decoder 274 bytes.
+state costs no persistent register and makes the general decoder 266 bytes.
 
 The ring's work is still **per call and per match segment, never per byte**:
 one destination clamp at entry, and a source recompute only for matches.
@@ -282,7 +284,7 @@ The copy uses `a2` as its transient source for both literals and matches, just
 like the other two decoders. Together they now share one compact allocation:
 addresses `a0` through `a2`, state `d0` through `d2`, and spent budget/scratch
 `d3` through `d5`. Nine registers are touched in total, with no gaps, for a
-232-byte fixed-ring decoder.
+224-byte fixed-ring decoder.
 
 Assemble the source with `RING_SIZE` defined, place the ring at a matching
 alignment, and keep its base in any preserved register if the drain loop
