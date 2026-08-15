@@ -57,7 +57,7 @@ them before decoding.
 
 ## Use case: streaming YM6
 
-The [YM6 format](https://www.lynn3686.com/ym3456_tidy.html) is a chiptune dump:
+The [YM6 format](http://leonard.oxg.free.fr/ymformat.html) is a chiptune dump:
 it stores the values written to the YM2149 sound chip for every video frame,
 along with song details and optional effects. At 50 Hz, its 14 sound registers
 use about 41 KiB per minute, although the player only needs the values it is
