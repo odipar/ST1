@@ -30,6 +30,7 @@ DATA_FILE = TEST / "timings.json"
 ROOT_README = REPO / "README.md"
 TEST_README = TEST / "README.md"
 CP = REPO / "target" / "classes"
+SCHEMA = 2
 
 NAMES = (
     "text", "wordsoup", "farmatch", "period129", "allsame", "rle32k",
@@ -93,7 +94,10 @@ def input_hashes() -> dict[str, str]:
 
 
 def corpora() -> dict[str, bytes]:
-    rows = runpy.run_path(str(TEST / "gendata.py"))["CASES"]
+    generated = runpy.run_path(str(TEST / "gendata.py"))
+    if (generated["RING_SMALL"], generated["RING_FAIR"]) != (256, 1024):
+        raise AssertionError("gendata.py timing profiles must remain -m256/-m1024")
+    rows = generated["CASES"]
     names = tuple(name for name, _, _ in rows)
     iterations = {name: count for name, _, count in rows}
     if names != NAMES or iterations != ITERATIONS:
@@ -274,20 +278,17 @@ def make_emulator(binary: bytes, compressed: bytes):
     # Imports are lazy so --fingerprint/--audit stay cheap and cannot invoke
     # Unicorn's host-CPU probe.
     from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN
-    from unicorn.unicorn_const import UC_CTL_CPU_MODEL
+    from unicorn.m68k_const import UC_CPU_M68K_M68000
 
     code, src, dst, stack_top, magic = 0x1000, 0x40000, 0x80000, 0xF8000, 0xE0000
     emulator = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
-    try:
-        emulator.ctl_set_cpu_model(0)  # UC_CPU_M68K_M68000
-    except Exception:
-        pass
+    emulator.ctl_set_cpu_model(UC_CPU_M68K_M68000)
     for base, size in ((code, 0x1000), (src, 0x10000), (dst, 0x20000),
                        (stack_top - 0x4000, 0x8000), (magic, 0x1000)):
         emulator.mem_map(base, size)
     emulator.mem_write(code, binary)
     emulator.mem_write(src, compressed)
-    return emulator, code, src, dst, stack_top, magic, UC_CTL_CPU_MODEL
+    return emulator, code, src, dst, stack_top, magic
 
 
 def call(emulator, entry: int, stack_top: int, magic: int, pc_register: int,
@@ -310,7 +311,7 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
         UC_M68K_REG_D1, UC_M68K_REG_D3, UC_M68K_REG_PC,
     )
 
-    emulator, code, src, dst, stack_top, magic, _ = make_emulator(binary, compressed)
+    emulator, code, src, dst, stack_top, magic = make_emulator(binary, compressed)
     counter = CycleCounter(emulator, listing, code, len(binary), UC_HOOK_CODE)
     emulator.reg_write(UC_M68K_REG_A0, src)
 
@@ -418,12 +419,13 @@ def build_model() -> dict:
     assert_harness_shapes()
     data = corpora()
     streams = {
-        "linear": {name: compress(content, None) for name, content in data.items()},
-        "ring": {name: compress(content, 256) for name, content in data.items()},
+        "normal": {name: compress(content, None) for name, content in data.items()},
+        "m256": {name: compress(content, 256) for name, content in data.items()},
+        "m1024": {name: compress(content, 1024) for name, content in data.items()},
     }
     rows: dict[str, dict[str, dict[str, int]]] = {
-        "linear": {"16": {}, "127": {}},
-        "ring": {"1024/16": {}},
+        "linear": {"m256/16": {}, "m1024/16": {}, "m1024/127": {}},
+        "ring": {"256/16": {}, "1024/16": {}},
         "ring_mod": {"256/16": {}, "1024/16": {}},
     }
     binaries: dict[str, dict[str, str | int]] = {}
@@ -448,33 +450,49 @@ def build_model() -> dict:
             for chunk in (16, 127):
                 binary, listing, symbols = assembled["linear"]
                 trace = trace_decoder(binary, listing, symbols,
-                                      streams["linear"][name], expected,
+                                      streams["m1024"][name], expected,
                                       "linear", chunk)
                 common = 36 * trace["calls"] - 2
-                rows["linear"][str(chunk)][name] = (
+                rows["linear"][f"m1024/{chunk}"][name] = (
                     trace["internal"] + common + LINEAR_FIXED
                 )
 
-            binary, listing, symbols = assembled["ring"]
-            trace = trace_decoder(binary, listing, symbols, streams["ring"][name],
-                                  expected, "ring", 16, 1024)
-            rows["ring"]["1024/16"][name] = (
-                trace["internal"] + 36 * trace["calls"] - 2 + GENERAL_FIXED
+            binary, listing, symbols = assembled["linear"]
+            trace = trace_decoder(binary, listing, symbols,
+                                  streams["m256"][name], expected,
+                                  "linear", 16)
+            rows["linear"]["m256/16"][name] = (
+                trace["internal"] + 36 * trace["calls"] - 2 + LINEAR_FIXED
             )
 
-            for size in (256, 1024):
+            binary, listing, symbols = assembled["ring"]
+            for size, profile in ((256, "m256"), (1024, "m1024")):
+                trace = trace_decoder(binary, listing, symbols,
+                                      streams[profile][name], expected,
+                                      "ring", 16, size)
+                rows["ring"][f"{size}/16"][name] = (
+                    trace["internal"] + 36 * trace["calls"] - 2 + GENERAL_FIXED
+                )
+
+            for size, profile in ((256, "m256"), (1024, "m1024")):
                 binary, listing, symbols = assembled[f"ring_mod_{size}"]
                 trace = trace_decoder(binary, listing, symbols,
-                                      streams["ring"][name], expected,
+                                      streams[profile][name], expected,
                                       "ring_mod", 16, size)
                 rows["ring_mod"][f"{size}/16"][name] = ring_mod_harness_cycles(trace)
 
     return {"cycles": rows, "binaries": binaries,
             "streams": {
-                "linear": {name: len(value) for name, value in streams["linear"].items()},
-                "ring": {name: len(value) for name, value in streams["ring"].items()},
-                "output": {name: len(value) for name, value in data.items()},
-            }}
+                profile: {
+                    name: {
+                        "bytes": len(value),
+                        "sha256": hashlib.sha256(value).hexdigest(),
+                    }
+                    for name, value in profile_streams.items()
+                }
+                for profile, profile_streams in streams.items()
+            },
+            "output": {name: len(value) for name, value in data.items()}}
 
 
 def ring_mod_harness_cycles(trace: dict[str, int]) -> int:
@@ -498,7 +516,7 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
     banners: list[str] = []
     calibration_blocks: dict[int, dict[str, int]] = {}
     ticks = {
-        "linear": {"16": {}, "127": {}},
+        "linear": {"m1024/16": {}, "m1024/127": {}},
         "ring": {"1024/16": {}},
         "ring_mod": {"256/16": {}, "1024/16": {}},
     }
@@ -534,11 +552,12 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
             fields = line.split()
             if section == "linear" and len(fields) == 5:
                 _, name, chunk, iterations, value = fields
-                if name not in NAMES or chunk not in ticks["linear"]:
+                key = f"m1024/{chunk}"
+                if name not in NAMES or key not in ticks["linear"]:
                     raise ValueError(f"unexpected linear timing row: {line}")
-                if name in ticks["linear"][chunk]:
+                if name in ticks["linear"][key]:
                     raise ValueError(f"duplicate timing row: {line}")
-                ticks["linear"][chunk][name] = int(value)
+                ticks["linear"][key][name] = int(value)
                 if int(iterations) != ITERATIONS[name]:
                     raise ValueError(f"iteration count changed: {line}")
             elif section in {"ring", "ring_mod"} and len(fields) == 6:
@@ -554,7 +573,7 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
             else:
                 raise ValueError(f"unrecognized timing line: {line}")
     expected_rows = (
-        ticks["linear"]["16"], ticks["linear"]["127"],
+        ticks["linear"]["m1024/16"], ticks["linear"]["m1024/127"],
         ticks["ring"]["1024/16"], ticks["ring_mod"]["256/16"],
         ticks["ring_mod"]["1024/16"],
     )
@@ -579,39 +598,71 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
             "iterations": ITERATIONS}
 
 
-def slash(values: dict[str, int]) -> str:
-    return "/".join(str(values[name]) for name in NAMES)
+def percent_change(value: int, baseline: int) -> str:
+    change = 100 * (value / baseline - 1)
+    prefix = "+" if change > 0 else ""
+    return f"{prefix}{change:.1f}%"
+
+
+def comparison_cell(value: int, baseline: int) -> str:
+    return f"{value:,} ({percent_change(value, baseline)})"
 
 
 def render_root(data: dict) -> str:
-    ticks = data["hatari"]["ticks"]
     cycles = data["model"]["cycles"]
-    sizes = data["model"]["binaries"]
-    return "\n".join([
+    lines = [
         f"<!-- Generated by 68k/test/emu/cycle_model.py; inputs {data['fingerprint'][:12]} -->",
-        "Current raw 200 Hz ticks, in corpus order",
-        "`text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`:",
+        "Fair N=1024, X=16 resume comparison on identical `-m1024` streams.",
+        "Linear means `jx1_resume` at X=16, not the one-shot entry. Values",
+        "are ideal plain-MC68000 cycles for the decoder plus its required",
+        "resume-loop control flow; each ring cell shows its cost versus linear.",
         "",
-        "| Decoder | code | N/X | ST ticks |",
-        "|---|---:|---|---|",
-        f"| linear | {sizes['linear']['bytes']} B | —/16 | {slash(ticks['linear']['16'])} |",
-        f"| linear | {sizes['linear']['bytes']} B | —/127 | {slash(ticks['linear']['127'])} |",
-        f"| general ring | {sizes['ring']['bytes']} B | 1024/16 | {slash(ticks['ring']['1024/16'])} |",
-        f"| `ring_mod` | {sizes['ring_mod_256']['bytes']} B | 256/16 | {slash(ticks['ring_mod']['256/16'])} |",
-        f"| `ring_mod` | {sizes['ring_mod_1024']['bytes']} B | 1024/16 | {slash(ticks['ring_mod']['1024/16'])} |",
+        "| corpus | linear | general ring | `ring_mod` |",
+        "|---|---:|---:|---:|",
+    ]
+    for name in NAMES:
+        linear = cycles["linear"]["m1024/16"][name]
+        lines.append(
+            f"| {name} | {linear:,} | "
+            f"{comparison_cell(cycles['ring']['1024/16'][name], linear)} | "
+            f"{comparison_cell(cycles['ring_mod']['1024/16'][name], linear)} |"
+        )
+    lines += [
         "",
-        "The matching ideal-cycle model and regeneration command are in",
-        "[68k/test/README.md](68k/test/README.md).",
-    ])
+        "The matching hardware measurements, stream-size cost, and regeneration",
+        "command are in [68k/test/README.md](68k/test/README.md).",
+    ]
+    return "\n".join(lines)
 
 
 def render_test(data: dict) -> str:
     model = data["model"]
     cycles = model["cycles"]
     streams = model["streams"]
+    output = model["output"]
     ticks = data["hatari"]["ticks"]
     lines = [
         f"<!-- Generated by emu/cycle_model.py; inputs {data['fingerprint'][:12]} -->",
+        "### Fair N=1024, X=16 comparison",
+        "",
+        "Every decoder receives the exact same `-m1024` bytes. Linear means its",
+        "resumable entry at X=16, not the faster one-shot entry. The totals include",
+        "the decoder and only the control flow its harness needs to resume and wrap;",
+        "application-specific consumption is excluded for all three. Ring cells show",
+        "the cycle cost relative to same-stream linear.",
+        "",
+        "| corpus | output | stream | linear | general ring | `ring_mod` |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for name in NAMES:
+        linear = cycles["linear"]["m1024/16"][name]
+        lines.append(
+            f"| {name} | {output[name]} | {streams['m1024'][name]['bytes']} | "
+            f"{linear:,} | {comparison_cell(cycles['ring']['1024/16'][name], linear)} | "
+            f"{comparison_cell(cycles['ring_mod']['1024/16'][name], linear)} |"
+        )
+    lines += [
+        "",
         "The model assembles the current sources and charges every executed",
         "instruction using plain-MC68000 timings. Each cell is one non-final",
         "iteration of the harness's timed core: setup, direct-label init/resume",
@@ -620,45 +671,43 @@ def render_test(data: dict) -> str:
         "`iterations × cell - 2`. Tick-edge synchronization, OS interrupts,",
         "wait states, and video-DMA contention are outside the model.",
         "",
-        "Linear uses the normal streams. Both rings use `-m256` streams; ring",
-        "rows are X=16 and the fixed ring is assembled separately for each N.",
+        "The same finite `run.sh` pass measured the comparison under cycle-exact",
+        "Hatari using the Atari ST's 200 Hz clock. Each value has ±1-tick",
+        "resolution; percentages here are",
+        "therefore less precise than the exact model above.",
         "",
-        "| corpus | output | stream | linear X16 | linear X127 |",
+        "| corpus | repeats | linear ticks | general ring ticks | `ring_mod` ticks |",
         "|---|---:|---:|---:|---:|",
     ]
     for name in NAMES:
+        linear = ticks["linear"]["m1024/16"][name]
         lines.append(
-            f"| {name} | {streams['output'][name]} | {streams['linear'][name]} | "
-            f"{cycles['linear']['16'][name]:,} | {cycles['linear']['127'][name]:,} |"
+            f"| {name} | {ITERATIONS[name]} | {linear} | "
+            f"{comparison_cell(ticks['ring']['1024/16'][name], linear)} | "
+            f"{comparison_cell(ticks['ring_mod']['1024/16'][name], linear)} |"
         )
     lines += [
         "",
-        "| corpus | stream `-m256` | general N1024 | `ring_mod` N256 | `ring_mod` N1024 |",
-        "|---|---:|---:|---:|---:|",
+        "### Compressor-window cost",
+        "",
+        "This is a compressor trade-off, not decoder overhead. Sizes are recorded",
+        "separately so they cannot distort either comparison above.",
+        "",
+        "| corpus | normal | `-m1024` (change) | `-m256` (change) |",
+        "|---|---:|---:|---:|",
     ]
     for name in NAMES:
+        normal = streams["normal"][name]["bytes"]
+        m1024 = streams["m1024"][name]["bytes"]
+        m256 = streams["m256"][name]["bytes"]
         lines.append(
-            f"| {name} | {streams['ring'][name]} | "
-            f"{cycles['ring']['1024/16'][name]:,} | "
-            f"{cycles['ring_mod']['256/16'][name]:,} | "
-            f"{cycles['ring_mod']['1024/16'][name]:,} |"
+            f"| {name} | {normal} | {comparison_cell(m1024, normal)} | "
+            f"{comparison_cell(m256, normal)} |"
         )
     lines += [
         "",
-        "The same finite `run.sh` pass produced these raw 200 Hz ticks, in",
-        "corpus order `text/wordsoup/farmatch/period129/allsame/rle32k/maxoffset`:",
-        "",
-        "| decoder | N/X | iterations | ST ticks |",
-        "|---|---|---|---|",
-        f"| linear | —/16 | 400/30/60/200/200/6/6 | {slash(ticks['linear']['16'])} |",
-        f"| linear | —/127 | 400/30/60/200/200/6/6 | {slash(ticks['linear']['127'])} |",
-        f"| general ring | 1024/16 | 400/30/60/200/200/6/6 | {slash(ticks['ring']['1024/16'])} |",
-        f"| `ring_mod` | 256/16 | 400/30/60/200/200/6/6 | {slash(ticks['ring_mod']['256/16'])} |",
-        f"| `ring_mod` | 1024/16 | 400/30/60/200/200/6/6 | {slash(ticks['ring_mod']['1024/16'])} |",
-        "",
-        "A tick is 5 ms (40,000 nominal 8 MHz cycles), and each displayed",
-        "measurement has ±1-tick resolution. Raw ticks include interrupt and",
-        "bus-contention time; the model does not.",
+        "A tick is 5 ms (40,000 nominal 8 MHz cycles); raw ticks",
+        "include interrupt and bus-contention time, while the model does not.",
         "",
         "Regenerate both tables after any decoder, compressor, corpus, model, or",
         "harness change:",
@@ -709,7 +758,13 @@ def docs_match(data: dict, verbose: bool = True) -> bool:
 def load_data() -> dict:
     if not DATA_FILE.exists():
         raise SystemExit(f"missing {DATA_FILE.relative_to(REPO)}")
-    return json.loads(DATA_FILE.read_text())
+    data = json.loads(DATA_FILE.read_text())
+    if data.get("schema") != SCHEMA:
+        raise SystemExit(
+            f"unsupported {DATA_FILE.relative_to(REPO)} schema "
+            f"{data.get('schema')!r}; expected {SCHEMA}"
+        )
+    return data
 
 
 def audit_only() -> bool:
@@ -759,7 +814,7 @@ def main() -> None:
 
     hatari = parse_hatari(args.hatari_output.read_text(errors="replace"), fingerprint)
     model = build_model()
-    data = {"schema": 1, "fingerprint": fingerprint,
+    data = {"schema": SCHEMA, "fingerprint": fingerprint,
             "inputs": input_hashes(),
             "model": model, "hatari": hatari}
     DATA_FILE.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")

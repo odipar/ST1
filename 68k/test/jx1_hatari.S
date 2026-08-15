@@ -89,10 +89,13 @@ start:
         bsr     putdec                          ; ticks
         bsr     crlf
 
-        lea     cases,a6
+        lea     fair_cases,a6                  ; same -m1024 bytes as N=1024 rings
 .tcase:
         tst.l   CASE_NAME(a6)
         beq     .done
+        moveq   #16,d7
+        bsr     t_resume                       ; verify the exact timed stream
+        bsr     crlf
         moveq   #16,d7
         bsr     time_case
         moveq   #127,d7

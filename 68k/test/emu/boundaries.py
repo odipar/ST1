@@ -23,7 +23,8 @@ sys.argv = [sys.argv[0]]                      # test68k reads argv for its binar
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test68k as t                                                    # noqa: E402
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN               # noqa: E402
-from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1,        # noqa: E402
+from unicorn.m68k_const import (UC_CPU_M68K_M68000,                    # noqa: E402
+                                UC_M68K_REG_A0, UC_M68K_REG_A1,
                                 UC_M68K_REG_D1, UC_M68K_REG_D2,
                                 UC_M68K_REG_D3)
 
@@ -31,10 +32,7 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1,        # noqa: E
 def make_emu(stream):
     """Like test68k.make_emu, but the input area holds a 64 KB literal run."""
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
-    try:
-        uc.ctl_set_cpu_model(0)
-    except Exception:
-        pass
+    uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)
     for base, size in ((t.CODE, 0x1000), (t.CTX, 0x1000), (t.SRC, 0x20000),
                        (t.DST, 0x20000), (t.STACK_TOP - 0x4000, 0x8000),
                        (t.MAGIC, 0x1000)):

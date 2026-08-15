@@ -8,8 +8,9 @@ import tempfile
 from pathlib import Path
 
 from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN
-from unicorn.unicorn_const import UC_CTL_CPU_MODEL, UC_HOOK_MEM_READ
+from unicorn.unicorn_const import UC_HOOK_MEM_READ
 from unicorn.m68k_const import (
+    UC_CPU_M68K_M68000,
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A3,
     UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_A6,
     UC_M68K_REG_A7, UC_M68K_REG_D6, UC_M68K_REG_D5, UC_M68K_REG_D4,
@@ -140,10 +141,7 @@ def context_size(name: str) -> int:
 
 def make_emu(compressed: bytes, src_bias: int = 0) -> Uc:
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
-    try:
-        uc.ctl_set_cpu_model(0)  # UC_CPU_M68K_M68000: plain 68000, no ColdFire leniency
-    except Exception:
-        pass
+    uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)  # no ColdFire leniency
     for base, size in ((CODE, 0x1000), (CTX, 0x1000), (SRC, 0x10000), (DST, 0x20000),
                        (STACK_TOP - 0x4000, 0x8000), (MAGIC, 0x1000)):
         uc.mem_map(base, size)
