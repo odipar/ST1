@@ -72,19 +72,6 @@ and never call it again; the final budget may be `O-(T-1)*C`. Choose `C` where
 `N mod C = 0` and wrap `a1` after each `F = N/C` calls when more calls remain.
 Keep `I` and `O` with the asset; use `-mN` when `N` is below 32512.
 
-## YX6: the YM player, built
-
-[yx6/](yx6/README.md) implements the streaming-YM6 design described below: a
-Java packer that turns a YM6 dump into fourteen ZX1 streams, an 810-byte 68000
-player that streams them through ST1_wrap, and a script that links the two into
-a runnable `.PRG`. Version 0.2 plays the fourteen standard YM2149 registers and
-loops; it plays no effects.
-
-```sh
-mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
-yx6/mkprg.sh song.yx6                 # -> SONG.PRG
-```
-
 ## Use case: streaming YM6
 
 The [YM6 format](http://leonard.oxg.free.fr/ymformat.html) is a chiptune dump:
@@ -140,6 +127,19 @@ uses ZX1 and advances one 16-value group per VBL in round-robin order, and its
 ST1 decoder can also serve other streamed data in the demo. Which player is
 smaller or faster depends on the tune; a fair answer needs both tested with the
 same input and memory limits.
+
+## YX6: the YM player, built
+
+[yx6/](yx6/README.md) implements that design: a Java packer that turns a YM6
+dump into fourteen ZX1 streams, an 810-byte 68000 player that streams them
+through ST1_wrap, and a script that links the two into a runnable `.PRG`.
+Version 0.2 plays the fourteen standard YM2149 registers and loops; it plays no
+effects.
+
+```sh
+mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
+yx6/mkprg.sh song.yx6                 # -> SONG.PRG
+```
 
 ## Compatibility with ZX1
 
