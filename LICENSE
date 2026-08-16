@@ -16,11 +16,11 @@ and the License section of c/zx1/README.md):
    files, you can simply ignore these conditions.
 
 2. THE DECOMPRESSORS - Java Decompressor/Djx1, C# Decompressor/Dnx1, the ST1
-   decompressors in 68k/ (ST1.S and ST1_ring.S), and the retired decompressor
-   variants in retired/68k/ (including jx1_68000_ring_mod.S) - can be used
-   freely within your own programs (for any platform), even for commercial
-   releases. The only condition is that you must indicate somehow in your
-   documentation that you have used ZX1, via ST1, jx1, or nx1.
+   decompressors in 68k/ (ST1.S, ST1_wrap.S, and ST1_ring.S), and the retired
+   decompressor variants in retired/68k/ (including jx1_68000_ring_mod.S) - can
+   be used freely within your own programs (for any platform), even for
+   commercial releases. The only condition is that you must indicate somehow
+   in your documentation that you have used ZX1, via ST1, jx1, or nx1.
 
 Attribution
 -----------
@@ -33,10 +33,11 @@ Attribution
   sizes, the incremental ring buffer, resumable decompression, the ST1/68000
   target, and the direction of the optimization campaign - see README.md) are
   Copyright (c) 2026 Robbert van Dalen.
-* The Java port, ST1/68000 decompressor variants, emulation/measurement rigs, and
-  retired optimization documentation were written by Claude (Anthropic's
-  Claude Code); the C# nx1 port was written by OpenAI Codex. Both were developed
-  under the direction of Robbert van Dalen.
+* The Java port, first ST1/68000 decompressor variants,
+  emulation/measurement rigs, and retired optimization documentation were
+  written by Claude (Anthropic's Claude Code). The C# nx1 port and the
+  ST1_wrap.S counted-wrap decoder and tests were written by OpenAI Codex. Both
+  were developed under the direction of Robbert van Dalen.
 
 BSD 3-Clause License (the compressor)
 -------------------------------------

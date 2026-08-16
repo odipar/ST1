@@ -8,7 +8,7 @@ ok, bad = [], []
 def check(cond, msg):
     (ok if cond else bad).append(msg)
 
-FILES = ['ST1.S', 'ST1_ring.S']
+FILES = ['ST1.S', 'ST1_ring.S', 'ST1_wrap.S']
 sizes = {}
 for f in FILES:
     out = subprocess.run(ASM + ['-o', '/tmp/a.bin', str(K68 / f)],
@@ -49,23 +49,35 @@ for f in FILES:
     check("d3.w = this call's budget" in src, f'{f}: resume documents the budget in d3.w')
     check('the budget in d3.w is 1..65535' in src, f'{f}: the budget range is stated')
 
-# 5. the state encoding the entry dispatch relies on
+# 5. the state encoding each entry dispatch relies on
 for f in FILES:
     src = (K68 / f).read_text()
     # init writes nothing: it seeds the three registers that are not pointers.
-    # The sign of lastOffset is the active-op state; d1/d2 encode START/DONE.
+    # The sign of lastOffset is the active-op state. Linear/general ring keep a
+    # repeatable DONE state; counted wrap trusts T and only dispatches zero as
+    # the initial START.
     check('moveq   #-128,d0' in src, f'{f}: init seeds the bit queue with $80')
     check('moveq   #-1,d2' in src,
           f'{f}: init encodes START with -lastOffset = -1')
-    check('tst.w   d1' in src and
-          ('beq.s   entry_special' in src or 'bne.s   op_body' in src),
-          f'{f}: zero remaining dispatches START/DONE')
+    if f == 'ST1_wrap.S':
+        check('tst.w   d1' in src and 'beq.s   begin_literals' in src and
+              'entry_special:' not in src,
+              f'{f}: zero remaining dispatches only the initial START')
+    else:
+        check('tst.w   d1' in src and
+              ('beq.s   entry_special' in src or 'bne.s   op_body' in src),
+              f'{f}: zero remaining dispatches START/DONE')
     check(src.count('neg.w   d2') == 2,
           f'{f}: lastOffset sign flips exactly at both LITERALS/MATCH transitions')
     check('tst.w   d2' in src, f'{f}: active-op dispatch tests signed lastOffset')
-    end = src[src.index('end_marker:'):]
-    check('clr.w   d1' not in end and 'clr.w   d2' in end,
-          f'{f}: DONE reuses proven-zero remaining and normalizes lastOffset')
+    if f == 'ST1_wrap.S':
+        check('bpl.s   resume_return' in src and 'end_marker:' not in src and
+              'clr.w   d2' not in src,
+              f'{f}: final marker returns without creating a DONE state')
+    else:
+        end = src[src.index('end_marker:'):]
+        check('clr.w   d1' not in end and 'clr.w   d2' in end,
+              f'{f}: DONE reuses proven-zero remaining and normalizes lastOffset')
     offset_head = src[src.index('new_offset:'):src.index('two_byte:')]
     offset_decode = src[src.index('new_offset:'):src.index('got_offset:')]
     check('moveq   #0,d1' not in offset_head and 'clr.w   d1' not in offset_head,
@@ -84,7 +96,8 @@ for f in FILES:
           f'{f}: match source consumes the negated offset directly')
 
 # 6. no stale ctx_alloc, no stale 15-byte wording anywhere current
-for f in FILES + ['test/ST1_test.S', 'test/ST1_ring_test.S']:
+for f in FILES + ['test/ST1_test.S', 'test/ST1_wrap_test.S',
+                  'test/ST1_ring_test.S']:
     src = (K68 / f).read_text()
     check('ctx_alloc' not in src, f'{f}: no ctx_alloc left')
     check('15 byte' not in src and '15-byte' not in src, f'{f}: no 15-byte wording')
@@ -114,8 +127,8 @@ runsh = (K68 / 'test' / 'run.sh').read_text()
 check('exit $fail' in runsh and 'BAD' in runsh, 'run.sh fails the command on BAD')
 check(not re.search(r'\b(32[0-9]|33[0-9])\b', runsh), 'run.sh quotes no stale byte counts')
 
-# 9. both harnesses poison the clobbered registers
-for f in ('test/ST1_test.S', 'test/ST1_ring_test.S'):
+# 9. all hardware harnesses poison the clobbered registers
+for f in ('test/ST1_test.S', 'test/ST1_wrap_test.S', 'test/ST1_ring_test.S'):
     src = (K68 / f).read_text()
     check('$BEEF0000' in src, f'{f}: poisons the clobbered registers before resume')
 
@@ -147,14 +160,15 @@ for f in FILES:
     body = '\n'.join(l for l in src.split('\n') if not l.lstrip().startswith(';'))
     check('a5' not in body, f'{f}: no a5 in the code - there is no context block')
     check('ctx_' not in body, f'{f}: no context field left')
-    state_words = ('signed offset/state in the low word' if f == FILES[1]
-                   else 'd2.w  signed offset/state')
+    state_words = ('d2.w  signed offset/state' if f == FILES[0]
+                   else 'signed offset/state in the low word')
     check(state_words in src, f'{f}: the header maps the folded state')
-linear_body = '\n'.join(l for l in (K68 / FILES[0]).read_text().splitlines()
-                        if not l.lstrip().startswith(';'))
-ring_body = '\n'.join(l for l in (K68 / FILES[1]).read_text().splitlines()
-                      if not l.lstrip().startswith(';'))
-for f, body in zip(FILES, (linear_body, ring_body)):
+decoder_bodies = {
+    f: '\n'.join(line for line in (K68 / f).read_text().splitlines()
+                  if not line.lstrip().startswith(';'))
+    for f in FILES
+}
+for f, body in decoder_bodies.items():
     check(re.search(r'^\s+.*\bd2\b', body, re.M), f'{f}: d2 holds lastOffset/state')
     check(re.search(r'^\s+.*\ba2\b', body, re.M), f'{f}: a2 is the copy source')
     check(not re.search(r'^\s+.*\bd6\b', body, re.M), f'{f}: d6 is untouched')
@@ -207,7 +221,7 @@ offset_decoder = re.compile(
     r'addq\.b\s+#2,d5\n'
     r'lsl\.w\s+#8,d5\n'
     r'add\.w\s+d5,d4\n'
-    r'bpl\.s\s+end_marker\n'
+    r'bpl\.s\s+(?:end_marker|resume_return)\n'
     r'got_offset:\n'
     r'move\.w\s+d4,d2')
 for f in FILES:
@@ -229,7 +243,8 @@ for f in FILES:
           f'{f}: positive state selects literals')
     check(bool(re.search(r'tst\.w\s+d2\nbmi\.s\s+match_copied', code)),
           f'{f}: negative state selects the match tail')
-    check(bool(re.search(r'add\.w\s+d5,d4\nbpl\.s\s+end_marker', code)),
+    marker_target = 'resume_return' if f == 'ST1_wrap.S' else 'end_marker'
+    check(bool(re.search(rf'add\.w\s+d5,d4\nbpl\.s\s+{marker_target}', code)),
           f'{f}: nonnegative decoded offsets select the end marker')
     ladder = ladder_remap.findall(code)
     expected_ladder = [('15', '4')]
@@ -308,6 +323,29 @@ check(bool(re.search(
       r'moveq\s+#0,d1\nsub\.w\s+a1,d1\nswap\s+d1\n'
       r'moveq\s+#-1,d2\nmove\.w\s+d3,d2\nswap\s+d2', ring_init)),
       'general ring init packs -start.low/end.low into the state highs')
+
+# Counted wrap packs the same start identity but stores runtime N rather than
+# end.low, and deliberately contains no destination-room clamp or auto-wrap.
+wrap_src = (K68 / 'ST1_wrap.S').read_text()
+wrap_init = instruction_text(
+    wrap_src[wrap_src.index('ST1_init:'):wrap_src.index('ST1_resume:')])
+check(bool(re.search(
+      r'moveq\s+#0,d1\nsub\.w\s+a1,d1\nswap\s+d1\n'
+      r'moveq\s+#-1,d2\nmove\.w\s+d3,d2\nswap\s+d2', wrap_init)),
+      'counted wrap init packs -ring_start.low/N into the state highs')
+wrap_code = instruction_text(wrap_src)
+check('short_room:' not in wrap_src and 'wrap_a1:' not in wrap_src and
+      'room = end.low' not in wrap_src,
+      'counted wrap contains no destination bounds or automatic wrap')
+check('N mod C = 0' in wrap_src and 'F = N/C' in wrap_src and
+      'ceil(O/C)' in wrap_src and 'I is the packed input size' in wrap_src,
+      'counted wrap states its I/O/N/C caller contract')
+check('HAS NO DONE STATE' in wrap_src and 'never make another decode call' in wrap_src,
+      'counted wrap warns that T is the only completion control')
+check(bool(re.search(
+      r'move\.l\s+d2,d5\nclr\.w\s+d5\nswap\s+d5\nadda\.l\s+d5,a2',
+      wrap_code)),
+      'counted wrap zero-extends runtime N for wrapped match sources')
 check(not re.search(r'\d+-byte word-aligned context', readme),
       'README promises no context block')
 
