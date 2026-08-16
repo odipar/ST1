@@ -1,7 +1,7 @@
 """Does a caller leaving junk in the clobbered registers break the decoders?
 
 The ABI names the registers ST1_resume clobbers, which promises nothing about
-their incoming values - so a caller may legally pass anything in them. Both
+their incoming values - so a caller may legally pass anything in them. All
 decoders expose the same compact scratch set, checked here.
 """
 import sys, importlib.util
@@ -19,6 +19,7 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
                                 UC_M68K_REG_D2, UC_M68K_REG_D3, UC_M68K_REG_D4)
 BIN = POS[0] if POS else 'ST1_ring.bin'
 LINEAR = len(POS) > 1 and POS[1] == 'linear'
+WRAP = len(POS) > 1 and POS[1] == 'wrap'
 REGS = {'d4': UC_M68K_REG_D4, 'd5': UC_M68K_REG_D5,
         'a2': UC_M68K_REG_A2}
 
@@ -36,8 +37,9 @@ def seed_or_check_state_highs(uc, ring, n, seed=False):
         t.assert_d0_high(uc)
     assert uc.reg_read(UC_M68K_REG_D1) >> 16 == ((-ring) & 0xFFFF), \
         'packed -start.low changed'
-    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == ((ring + n) & 0xFFFF), \
-        'packed end.low changed'
+    expected = n if WRAP else ((ring + n) & 0xFFFF)
+    assert uc.reg_read(UC_M68K_REG_D2) >> 16 == expected, \
+        'packed N/end.low changed'
 
 def run(data, n, chunk, poison):
     comp = t.java_compress(data, min(n, 32512))
@@ -45,11 +47,13 @@ def run(data, n, chunk, poison):
     ring = t.DST
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
     if not LINEAR:
-        uc.reg_write(UC_M68K_REG_D3, ring + n)   # transient general-ring bound
+        init_value = n if WRAP else ring + n
+        uc.reg_write(UC_M68K_REG_D3, init_value)  # N or general-ring end
     t.call(uc, t.CODE)
     seed_or_check_state_highs(uc, ring, n, seed=True)
     uc.reg_write(UC_M68K_REG_A1, ring)         # the caller holds the write pointer
     out, prev, calls = bytearray(), ring, 0
+    total_calls = (len(data) + chunk - 1) // chunk if WRAP else None
     while True:
         calls += 1
         if calls > 4 * (len(data) // max(1, min(chunk, n)) + 8):
@@ -67,10 +71,12 @@ def run(data, n, chunk, poison):
             return f'DST OUT OF RING ({dst - ring})'
         out += uc.mem_read(prev, max(0, dst - prev))
         if dst == ring + n:
+            if WRAP and calls < total_calls:
+                uc.reg_write(UC_M68K_REG_A1, ring)
             prev = ring
         else:
             prev = dst
-        if rc == 0:
+        if (WRAP and calls == total_calls) or (not WRAP and rc == 0):
             break
     return 'ok' if bytes(out) == data else f'WRONG ({len(out)} of {len(data)} bytes)'
 
@@ -78,7 +84,9 @@ ENTRY = t.CODE + (8 if LINEAR else 4)
 # The loop below drives the ring interface. The linear decoder has no ring - it
 # writes straight ahead - so the only meaningful bound for it is one that holds
 # the whole output; a smaller N would flag ordinary linear output as escaping.
-SIZES = ((65535, 16),) if LINEAR else ((1024, 16), (65535, 16))
+SIZES = (((65535, 16),) if LINEAR else
+         ((1024, 16), (65535, 255)) if WRAP else
+         ((1024, 16), (65535, 16)))
 POISONS = (('d4',), ('d5',), ('a2',), ('d4', 'd5', 'a2'))
 failures = 0
 for name, data, _ in t.testcases():
@@ -90,7 +98,7 @@ for name, data, _ in t.testcases():
             tag = 'clean' if not poison else '+'.join(poison)
             flag = '' if r == 'ok' else '   <-- FAILS'
             failures += r != 'ok'
-            print(f'{BIN:12s} {name:10s} N={n:5d} X={chunk:3d} poison={tag:26s} {r}{flag}')
+            print(f'{BIN:12s} {name:10s} N={n:5d} C={chunk:3d} poison={tag:26s} {r}{flag}')
 # The other half of the same contract: exactly which registers calls may
 # destroy.  Canary every non-state register before every call and union the
 # changes over a whole mixed stream.  A scratch register need not change on
@@ -111,10 +119,12 @@ def clobbered(data, n, chunk):
     ring = t.DST
     uc.reg_write(UC_M68K_REG_A0, t.SRC); uc.reg_write(UC_M68K_REG_A1, ring)
     if not LINEAR:
-        uc.reg_write(UC_M68K_REG_D3, ring + n)
+        init_value = n if WRAP else ring + n
+        uc.reg_write(UC_M68K_REG_D3, init_value)
     t.call(uc, t.CODE)
     seed_or_check_state_highs(uc, ring, n, seed=True)
     seen, calls = set(), 0
+    total_calls = (len(data) + chunk - 1) // chunk if WRAP else None
     while True:
         calls += 1
         assert calls <= len(data) + 2, 'clobber probe did not terminate'
@@ -126,7 +136,12 @@ def clobbered(data, n, chunk):
         seed_or_check_state_highs(uc, ring, n)
         seen |= {name for name, reg in ALL.items()
                  if uc.reg_read(reg) != initial[name]}
-        if more == 0:
+        if WRAP:
+            if calls == total_calls:
+                return seen
+            if uc.reg_read(UC_M68K_REG_A1) == ring + n:
+                uc.reg_write(UC_M68K_REG_A1, ring)
+        elif more == 0:
             return seen
 
 

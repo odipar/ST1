@@ -12,10 +12,12 @@ pip install unicorn                           # plus rmac on PATH
 
 python3 68k/test/emu/test68k.py               # linear: 13 corpora × chunks
 python3 68k/test/emu/test_ring_gen.py         # ring: 13 corpora × 19 shapes
+python3 68k/test/emu/test_wrap.py              # counted wrap: dividing N/C shapes
 python3 68k/test/emu/boundaries.py            # exact operation-length limits
 python3 68k/test/emu/align68k.py              # odd-address audit, linear
 python3 68k/test/emu/align_ring2.py ST1_ring.bin
 python3 68k/test/emu/poison.py ST1.bin linear
+python3 68k/test/emu/poison.py ST1_wrap.bin wrap
 python3 68k/test/emu/poison.py ST1_ring.bin
 python3 68k/test/emu/audit.py                 # doc-vs-code claims
 python3 68k/test/emu/cycle_model.py --check   # current ideal-cycle tables
@@ -34,12 +36,14 @@ and builds that reference once (a cold first run is about 80 seconds, almost
 all of it the two compressors working).
 
 Most scripts take a binary name and assemble `68k/<name>.S` if it is not
-already present. The ring suite covers arbitrary alignment, power-of-two and
-non-power-of-two sizes, and dividing and non-dividing budgets.
+already present. The general-ring suite covers arbitrary alignment,
+power-of-two and non-power-of-two sizes, and dividing and non-dividing budgets.
+The counted-wrap suite uses only `N mod C = 0` shapes and makes the caller wrap
+after `F=N/C` calls.
 
 ## What they check beyond "the output matches"
 
-* **`poison.py`** checks the common register contract from both ends. Both
+* **`poison.py`** checks the common register contract from both ends. All
   decoders keep their state in `a0.l`/`a1.l` and `d0.b`/`d1.w`/`d2.w`, take
   and spend the per-call budget in `d3.w`, and use `d4`/`d5`/`a2` as scratch.
   The test fills those scratch registers, plus the ignored high word of `d3`,
@@ -48,7 +52,8 @@ non-power-of-two sizes, and dividing and non-dividing budgets.
   stream. The observed set must be exactly `d3`/`d4`/`d5`/`a2`; `d6`/`d7`
   and `a3`-`a6` must survive every path. Both get a canary in the caller-owned
   upper 24 bits of `d0`; linear also gets canaries in the caller-owned high
-  words of `d1` and `d2`. The ring uses those two high words for packed bounds.
+  words of `d1` and `d2`. The ring decoders use those two high words for their
+  packed metadata.
 * **`align68k.py` / `align_ring2.py`** hook every memory access and reject a
   `.w`/`.l` at an odd address. A real 68000 raises an address error there;
   Unicorn does not, so without this the emulator would happily bless code
@@ -56,12 +61,12 @@ non-power-of-two sizes, and dividing and non-dividing budgets.
 * **`boundaries.py`** hand-authors streams containing one operation of an
   exact length. The corpora top out at 32000 bytes, so nothing else here can
   reach the point where an operation's length stops fitting a word; this pins
-  it at 65535 on all three decode paths, and checks that `jx1 -l65535` or
-  `nx1 -l65535` produces streams that stay inside it. Every hand-authored
-  stream is validated against the Java decompressor first — if the reference
-  cannot read it, no ST1 result means anything. It also places the N=65535
-  general ring across a
-  64 KB address boundary and fills it in both caller- and decoder-wrap modes.
+  it at 65535 on the linear and general-ring paths, and checks that
+  `jx1 -l65535` or `nx1 -l65535` produces streams that stay inside it. Every
+  hand-authored stream is validated against the Java decompressor first — if
+  the reference cannot read it, no ST1 result means anything. It also places
+  the N=65535 general ring across a 64 KB address boundary and fills it in both
+  caller- and decoder-wrap modes.
 * **`test_ring_gen.py`** additionally requires that nothing is ever written
   outside the ring, that the write pointer never wraps inside a call, that
   the common preserved registers come back untouched, and that a finished
@@ -70,12 +75,17 @@ non-power-of-two sizes, and dividing and non-dividing budgets.
   word into `d2.high`, leaving no persistent bound register. The general suite
   checks both packed values throughout its 19 caller-wrap and decoder-wrap
   shapes.
+* **`test_wrap.py`** drives `ST1_wrap.S` from the known `I`, `O`, `N`, and `C`.
+  It checks `T=ceil(O/C)`, a shorter final budget, caller wrapping after exactly
+  `F=N/C` full calls, arbitrary odd ring addresses, wrapped match sources,
+  writes and reads staying inside the ring, and packed metadata. It makes
+  exactly `T` calls and never polls for the DONE state that this variant omits.
 * **`compat.py`** is the only script here whose reference is not jx1. It
   builds `zx1` and `dzx1` from `c/zx1/src` and checks that jx1's output
   matches the C compressor's byte for byte, that each side decompresses the
   other, that the `-mN` and `-lN` options still produce streams C can read,
-  and — the part that belongs to this directory — that both ST1
-  decoders decode a stream the C compressor produced. Everything else here
+  and — the part that belongs to this directory — that the ST1 decoders decode
+  a stream the C compressor produced. Everything else here
   checks jx1 against jx1, where a shared misunderstanding of the format would
   pass unnoticed.
 * **`audit.py`** checks the documentation against the sources: assembled

@@ -29,6 +29,7 @@ sys.argv = [sys.argv[0]]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test68k as t                                                    # noqa: E402
 import boundaries as b                                                 # noqa: E402
+import test_wrap as w                                                  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
 CSRC = REPO / 'c' / 'zx1' / 'src'
@@ -158,10 +159,17 @@ def main():
         stream = c_compress(data)
         for binary, run, how in (
                 ('ST1.bin', lambda s: b.run_linear(s), 'one-shot'),
-                ('ST1.bin', lambda s: b.run_linear(s, 16), 'X=16'),
+                ('ST1.bin', lambda s: b.run_linear(s, 16), 'C=16'),
+                ('ST1_wrap.bin',
+                 lambda s, expected=data: w.run_wrap(
+                     s, expected, 32512, 16, w.t.DST + 11),
+                 'counted wrap N=32512 C=16'),
                 ('ST1_ring.bin', lambda s: b.run_ring(s, 32512, 16),
                  'ring 32512/16')):
-            t.BIN = t._binary(binary)
+            if binary == 'ST1_wrap.bin':
+                w.t.BIN = w.t._binary(binary)
+            else:
+                t.BIN = t._binary(binary)
             try:
                 ok = run(stream) == data
             except Exception as e:                       # a runaway or a bad read
@@ -171,7 +179,7 @@ def main():
                 print(f'   FAIL {name} on {binary} ({how})')
                 failures += 1
 
-    print(f'   {decodes} decodes across both decompressors')
+    print(f'   {decodes} decodes across all three decompressors')
     print('ALL COMPATIBILITY CHECKS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0
 

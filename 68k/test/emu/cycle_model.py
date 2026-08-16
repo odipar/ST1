@@ -30,7 +30,7 @@ DATA_FILE = TEST / "timings.json"
 ROOT_README = REPO / "README.md"
 TEST_README = TEST / "README.md"
 CP = REPO / "target" / "classes"
-SCHEMA = 3
+SCHEMA = 4
 
 NAMES = (
     "text", "wordsoup", "farmatch", "period129", "allsame", "rle32k",
@@ -48,12 +48,14 @@ ITERATIONS = {
 
 # Exact non-final timed-iteration overhead outside the traced decoder bodies.
 # Every value is checked against the corresponding source shape below.  It
-# includes the harness's direct-label calls, setup, budget/result loop, and
+# includes the harness's direct-label calls, setup, budget/call loop, and
 # outer taken branch.  The final outer BNE is two cycles cheaper.
 LINEAR_FIXED = 128
+WRAP_FIXED = 138
 GENERAL_FIXED = 188
 EXPECTED_HARNESS_SCOPES = {
     "linear": "a36acce14c93547a6a14971454944eb0de177521bc8c81ab74872a9e5973f0b3",
+    "wrap": "292f2ba4c90214d54542fb74c79af5bf9816c8010c4f2eb1f13db421b1cf49d2",
     "ring": "8534d768faf80198f3fc6dc694e4a7abef4d56e6494ee06a40f51a4211139a85",
 }
 
@@ -61,9 +63,11 @@ EXPECTED_HARNESS_SCOPES = {
 def timing_inputs() -> list[Path]:
     fixed = [
         K68 / "ST1.S",
+        K68 / "ST1_wrap.S",
         K68 / "ST1_ring.S",
         TEST / "gendata.py",
         TEST / "ST1_test.S",
+        TEST / "ST1_wrap_test.S",
         TEST / "ST1_ring_test.S",
         TEST / "hatari_util.inc",
         TEST / "run.sh",
@@ -315,7 +319,7 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
     if variant == "linear":
         ring = dst
         ring_end = None
-    elif variant == "ring":
+    elif variant in ("wrap", "ring"):
         ring = dst + 11
         ring_end = ring + int(ring_size)
     else:
@@ -323,6 +327,8 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
     emulator.reg_write(UC_M68K_REG_A1, ring)
     if variant == "ring":
         emulator.reg_write(UC_M68K_REG_D3, ring_end)
+    elif variant == "wrap":
+        emulator.reg_write(UC_M68K_REG_D3, int(ring_size))
 
     call(emulator, code + symbols["ST1_init"], stack_top, magic,
          UC_M68K_REG_PC, UC_M68K_REG_A7)
@@ -331,6 +337,7 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
     output = bytearray()
     previous = ring
     calls = 0
+    counted_calls = math.ceil(len(expected) / chunk) if variant == "wrap" else None
     while True:
         calls += 1
         prior = emulator.reg_read(UC_M68K_REG_D3)
@@ -344,11 +351,18 @@ def trace_decoder(binary: bytes, listing: dict[int, Instruction], symbols: dict[
             raise AssertionError(f"{variant}: invalid emission {emitted}")
         output.extend(emulator.mem_read(previous, emitted))
         more = emulator.reg_read(UC_M68K_REG_D1) & 0xFFFF
-        if ring_end is not None and current == ring_end:
+        counted_done = variant == "wrap" and calls == counted_calls
+        if (variant == "wrap" and not counted_done
+                and calls % (int(ring_size) // chunk) == 0):
+            if current != ring_end:
+                raise AssertionError("wrap: F calls did not end at ring+N")
+            emulator.reg_write(UC_M68K_REG_A1, ring)
+            previous = ring
+        elif variant == "ring" and current == ring_end:
             previous = ring
         else:
             previous = current
-        if more == 0:
+        if counted_done or (variant != "wrap" and more == 0):
             break
 
     if bytes(output) != expected:
@@ -377,6 +391,7 @@ def _normalized_assembly(text: str) -> str:
 
 def harness_scope_hashes() -> dict[str, str]:
     linear = (TEST / "ST1_test.S").read_text()
+    wrap = (TEST / "ST1_wrap_test.S").read_text()
     ring = (TEST / "ST1_ring_test.S").read_text()
     linear_time = _label(linear, "time_case:")
     linear_loop = _label(linear, ".loop:", linear_time)
@@ -390,9 +405,16 @@ def harness_scope_hashes() -> dict[str, str]:
     ring_loop = _label(ring, ".loop:", ring_time)
     ring_elapsed = ring.index("bsr     elapsed", ring_loop)
     ring_scope = ring[_label(ring, "ring_init:"):ring_time] + ring[ring_loop:ring_elapsed]
+    wrap_time = _label(wrap, "time_wrap:")
+    wrap_loop = _label(wrap, ".loop:", wrap_time)
+    wrap_elapsed = wrap.index("bsr     elapsed", wrap_loop)
+    wrap_scope = (wrap[_label(wrap, "run_wrap:"):wrap_time]
+                  + wrap[wrap_loop:wrap_elapsed])
     return {
         "linear": hashlib.sha256(
             _normalized_assembly(linear_scope).encode()).hexdigest(),
+        "wrap": hashlib.sha256(
+            _normalized_assembly(wrap_scope).encode()).hexdigest(),
         "ring": hashlib.sha256(
             _normalized_assembly(ring_scope).encode()).hexdigest(),
     }
@@ -417,6 +439,7 @@ def build_model() -> dict:
     }
     rows: dict[str, dict[str, dict[str, int]]] = {
         "linear": {"m256/16": {}, "m1024/16": {}, "m1024/127": {}},
+        "wrap": {"256/16": {}, "1024/16": {}},
         "ring": {"256/16": {}, "1024/16": {}},
     }
     binaries: dict[str, dict[str, str | int]] = {}
@@ -425,6 +448,7 @@ def build_model() -> dict:
         assembled = {}
         for key, source in (
             ("linear", K68 / "ST1.S"),
+            ("wrap", K68 / "ST1_wrap.S"),
             ("ring", K68 / "ST1_ring.S"),
         ):
             binary, listing, symbols = assemble(directory, source)
@@ -453,6 +477,17 @@ def build_model() -> dict:
             rows["linear"]["m256/16"][name] = (
                 trace["internal"] + 36 * trace["calls"] - 2 + LINEAR_FIXED
             )
+
+            binary, listing, symbols = assembled["wrap"]
+            for size, profile in ((256, "m256"), (1024, "m1024")):
+                trace = trace_decoder(binary, listing, symbols,
+                                      streams[profile][name], expected,
+                                      "wrap", 16, size)
+                wraps = (len(expected) - 1) // size
+                rows["wrap"][f"{size}/16"][name] = (
+                    trace["internal"] + 52 * trace["calls"] - 12
+                    + 16 * wraps + WRAP_FIXED
+                )
 
             binary, listing, symbols = assembled["ring"]
             for size, profile in ((256, "m256"), (1024, "m1024")):
@@ -485,6 +520,7 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
     calibration_blocks: dict[int, dict[str, int]] = {}
     ticks = {
         "linear": {"m1024/16": {}, "m1024/127": {}},
+        "wrap": {"1024/16": {}},
         "ring": {"1024/16": {}},
     }
     fingerprints: list[str] = []
@@ -497,6 +533,9 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
             fingerprints.append(fields[1])
         elif line == "ST1 TEST":
             section = "linear"
+            banners.append(section)
+        elif line == "ST1 WRAP TEST":
+            section = "wrap"
             banners.append(section)
         elif line == "ST1 RING TEST":
             section = "ring"
@@ -524,7 +563,7 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
                 ticks["linear"][key][name] = int(value)
                 if int(iterations) != ITERATIONS[name]:
                     raise ValueError(f"iteration count changed: {line}")
-            elif section == "ring" and len(fields) == 6:
+            elif section in ("wrap", "ring") and len(fields) == 6:
                 _, name, size, chunk, iterations, value = fields
                 key = f"{size}/{chunk}"
                 if name not in NAMES or key not in ticks[section]:
@@ -538,23 +577,24 @@ def parse_hatari(text: str, expected_fingerprint: str) -> dict:
                 raise ValueError(f"unrecognized timing line: {line}")
     expected_rows = (
         ticks["linear"]["m1024/16"], ticks["linear"]["m1024/127"],
+        ticks["wrap"]["1024/16"],
         ticks["ring"]["1024/16"],
     )
     if any(tuple(row) != NAMES for row in expected_rows):
         raise ValueError("Hatari output is incomplete or corpus order changed")
-    if banners != ["linear", "ring"]:
+    if banners != ["linear", "wrap", "ring"]:
         raise ValueError(f"unexpected Hatari program sequence: {banners}")
-    if text.count("DONE") != 2:
-        raise ValueError("expected both Hatari executables to reach DONE")
-    if tuple(calibration_blocks) != (0, 1):
-        raise ValueError("expected two Hatari calibration lines")
+    if text.count("DONE") != 3:
+        raise ValueError("expected all three Hatari executables to reach DONE")
+    if tuple(calibration_blocks) != (0, 1, 2):
+        raise ValueError("expected three Hatari calibration lines")
     if fingerprints != [expected_fingerprint]:
         raise ValueError(
             "Hatari output was not produced from the current timing inputs"
         )
     calibrations = {
         key: calibration_blocks[index]
-        for index, key in enumerate(("linear", "ring"))
+        for index, key in enumerate(("linear", "wrap", "ring"))
     }
     return {"ticks": ticks, "calibration": calibrations,
             "iterations": ITERATIONS}
@@ -571,11 +611,20 @@ def comparison_cell(value: int, baseline: int) -> str:
 
 
 def render_root(data: dict) -> str:
+    cycles = data["model"]["cycles"]
+    baseline = cycles["linear"]["m1024/16"]
+    normal = NAMES[:-1]
+    wrap_average = sum(
+        100 * (cycles["wrap"]["1024/16"][name] / baseline[name] - 1)
+        for name in normal) / len(normal)
+    ring_average = sum(
+        100 * (cycles["ring"]["1024/16"][name] / baseline[name] - 1)
+        for name in normal) / len(normal)
     lines = [
         f"<!-- Generated by 68k/test/emu/cycle_model.py; inputs {data['fingerprint'][:12]} -->",
-        "With N=1024 and 16-byte calls on identical `-m1024` streams, the ring",
-        "decoder is on average about 12–13% slower than the resumable linear decoder",
-        "on the normal compressed test cases.",
+        "With N=1024 and C=16 on identical `-m1024` streams, counted wrap is",
+        f"{wrap_average:.1f}% slower and the general ring {ring_average:.1f}% slower than",
+        "resumable linear on average across the normal compressed test cases.",
     ]
     lines += [
         "",
@@ -593,29 +642,30 @@ def render_test(data: dict) -> str:
     ticks = data["hatari"]["ticks"]
     lines = [
         f"<!-- Generated by emu/cycle_model.py; inputs {data['fingerprint'][:12]} -->",
-        "### Fair N=1024, X=16 comparison",
+        "### Fair N=1024, C=16 comparison",
         "",
-        "Both ST1 decoders receive the exact same `-m1024` bytes. Linear means its",
-        "resumable entry at X=16, not the faster one-shot entry. The totals include",
-        "the decoder and only the control flow its harness needs to resume and wrap;",
-        "application-specific consumption is excluded for both. The ring cells show",
-        "the cycle cost relative to same-stream linear.",
+        "All three ST1 decoders receive the exact same `-m1024` bytes. Linear means",
+        "its resumable entry at C=16, not the faster one-shot entry. The totals include",
+        "the decoder and only the control flow each harness needs to resume and wrap;",
+        "application-specific consumption is excluded. Both ring cells show their",
+        "cycle cost relative to same-stream linear.",
         "",
-        "| corpus | output | stream | linear | general ring |",
-        "|---|---:|---:|---:|---:|",
+        "| corpus | O | I | linear | counted wrap | general ring |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
     for name in NAMES:
         linear = cycles["linear"]["m1024/16"][name]
         lines.append(
             f"| {name} | {output[name]} | {streams['m1024'][name]['bytes']} | "
-            f"{linear:,} | {comparison_cell(cycles['ring']['1024/16'][name], linear)} |"
+            f"{linear:,} | {comparison_cell(cycles['wrap']['1024/16'][name], linear)} | "
+            f"{comparison_cell(cycles['ring']['1024/16'][name], linear)} |"
         )
     lines += [
         "",
         "The model assembles the current sources and charges every executed",
         "instruction using plain-MC68000 timings. Each cell is one non-final",
         "iteration of the harness's timed core: setup, direct-label init/resume",
-        "calls, budget/result loop, ring wrapping, and the taken outer branch.",
+        "calls, budget/call loop, ring wrapping, and the taken outer branch.",
         "The final iteration is two cycles cheaper, so a complete run is",
         "`iterations × cell - 2`. Tick-edge synchronization, OS interrupts,",
         "wait states, and video-DMA contention are outside the model.",
@@ -625,13 +675,14 @@ def render_test(data: dict) -> str:
         "resolution; percentages here are",
         "therefore less precise than the exact model above.",
         "",
-        "| corpus | repeats | linear ticks | general ring ticks |",
-        "|---|---:|---:|---:|",
+        "| corpus | repeats | linear ticks | counted-wrap ticks | general-ring ticks |",
+        "|---|---:|---:|---:|---:|",
     ]
     for name in NAMES:
         linear = ticks["linear"]["m1024/16"][name]
         lines.append(
             f"| {name} | {ITERATIONS[name]} | {linear} | "
+            f"{comparison_cell(ticks['wrap']['1024/16'][name], linear)} | "
             f"{comparison_cell(ticks['ring']['1024/16'][name], linear)} |"
         )
     lines += [

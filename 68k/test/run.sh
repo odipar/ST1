@@ -18,6 +18,7 @@ TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 python3 gendata.py
 printf 'TIMING_INPUT %s\n' "$(python3 emu/cycle_model.py --fingerprint)"
 rmac -m68000 -p +o3 -i. -i.. -o ST1TEST.PRG ST1_test.S                    # linear
+rmac -m68000 -p +o3 -i. -i.. -o ST1WRAP.PRG ST1_wrap_test.S               # counted wrap
 rmac -m68000 -p +o3 -i. -i.. -o ST1RING.PRG ST1_ring_test.S               # ring
 
 # --disable-video runs Hatari headless (no window); it does not change what is
@@ -40,5 +41,6 @@ run() {
     esac
 }
 run ST1TEST.PRG
+run ST1WRAP.PRG
 run ST1RING.PRG
 exit $fail
