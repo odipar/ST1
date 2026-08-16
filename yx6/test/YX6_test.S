@@ -1,9 +1,10 @@
 ; -----------------------------------------------------------------------------
 ; YX6_test.S - real-hardware validation for yx6/YX6.S.
 ;
-; Plays an embedded tune on the actual sound chip and reads every register back
-; after every frame, folding the chip's contents into a checksum that the host
-; computed from the YM data alone. That covers what emulation cannot: the
+; Plays an embedded looping tune on the actual sound chip and reads every
+; register back after every frame, folding the chip's contents into a checksum
+; that the host computed from the YM data alone. It plays past the end of the
+; tune, so the loop point is crossed and the wrap count is checked too. That covers what emulation cannot: the
 ; player is writing to a real YM2149 through real bus cycles, and a wrong
 ; register number or a missed write changes the checksum.
 ;
@@ -43,29 +44,48 @@ start:
         tst.l   d0
         bne     .bad
 
+        clr.w   wraps
         moveq   #0,d7                           ; the running checksum
-        move.l  #YX6_FRAMES,d6                  ; frames left to play
+        move.l  #YX6_PLAY,d6                    ; frames left to play
+; Selecting a register and reading it back are two bus cycles, and TOS's own
+; interrupt handlers use the sound chip too - the floppy motor timeout writes
+; port A. With interrupts on, one landing between the two makes the harness
+; read whichever register TOS selected, so the whole verification runs masked.
+        move.w  sr,-(sp)
+        ori.w   #$0700,sr
 .frame:
         lea     workspace,a0
         bsr     YX6_play
         tst.l   d0
-        bne.s   .bad                            ; ended early: the count is wrong
+        bmi.s   .bad                            ; a looping tune never ends
+        beq.s   .counted
+        addq.w  #1,wraps                        ; that frame ended the tune
+.counted:
         bsr     fold_chip
         subq.l  #1,d6
         bne.s   .frame
 
-        lea     workspace,a0                    ; one more call must report the
-        bsr     YX6_play                        ; end and touch nothing
-        cmp.l   #1,d0
+        move.w  (sp)+,sr                        ; interrupts back on
+        cmp.w   #YX6_WRAPS,wraps
         bne.s   .bad
         cmp.l   #YX6_SUM,d7
         bne.s   .bad
         lea     m_ok,a0
         bsr     puts
-        bra.s   .timing
+        bra.s   .wrapcount
 .bad:
         lea     m_bad,a0
         bsr     puts
+.wrapcount:
+        lea     m_wraps,a0                      ; printed either way, so a
+        bsr     puts                            ; mismatch says which half failed
+        moveq   #0,d0
+        move.w  wraps,d0
+        bsr     putdec
+        lea     m_sum2,a0
+        bsr     puts
+        move.l  d7,d0
+        bsr     putdec
 
 ; ------------------------------------------------------- what a frame costs
 .timing:
@@ -90,12 +110,12 @@ start:
         bsr     YX6_init
         lea     m_t,a0
         bsr     puts
-        move.l  #YX6_FRAMES,d0
+        move.l  #YX6_PLAY,d0
         bsr     putdec
         lea     m_sp,a0
         bsr     puts
 
-        move.l  #YX6_FRAMES,d6
+        move.l  #YX6_PLAY,d6
         bsr     sync
 .play:
         lea     workspace,a0
@@ -152,6 +172,8 @@ m_ok:       dc.b    "OK ",0
 m_bad:      dc.b    "BAD ",0
 m_calib:    dc.b    "CALIB ",0
 m_t:        dc.b    "T ",0
+m_wraps:    dc.b    "wraps=",0
+m_sum2:     dc.b    " sum=",0
 m_sp:       dc.b    " ",0
 m_done:     dc.b    "DONE",13,10,0
         even
@@ -161,6 +183,7 @@ m_done:     dc.b    "DONE",13,10,0
         .bss
         even
 save_ssp:   ds.l    1
+wraps:      ds.w    1
 ; The parentheses matter: rmac evaluates expressions strictly left to right.
 workspace:  ds.b    YX6_FIXED+(YX6_STREAMS*RING_SIZE)
         even

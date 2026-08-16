@@ -2,7 +2,8 @@
 ; YX6_player.S - a complete TOS program that plays one .yx6 file.
 ;
 ; This is what yx6/mkprg.sh assembles around a song: it installs YX6 on the
-; VBL, plays the tune once, and quits on a key press or when the tune ends.
+; VBL, plays the tune - round its loop for as long as it has one - and quits
+; on a key press or when a play-once tune ends.
 ; It is also the smallest worked example of the library's calling convention.
 ;
 ; It is not a standalone assembly: the includer supplies the two things that
@@ -84,7 +85,8 @@ start:
 ; -----------------------------------------------------------------------------
 ; The VBL handler runs in supervisor mode at 50 Hz, which is exactly what
 ; YX6_play wants: one call per frame, in order, and never after it reports the
-; end of the tune.
+; end. A looping tune never reports one - it returns 1 each time it goes round
+; and plays until the key press stops it.
 ; -----------------------------------------------------------------------------
 install:
         move.l  VBL_VECTOR,old_vbl
@@ -103,8 +105,8 @@ handler:
         lea     workspace,a0
         bsr     YX6_play
         tst.l   d0
-        beq.s   .chain
-        move.w  #1,finished                     ; the tune has run out
+        bpl.s   .chain                          ; 0 played, 1 went round again
+        move.w  #1,finished                     ; -1: a play-once tune ran out
         bsr     YX6_stop
 .chain:
         movem.l (sp)+,d0-d7/a0-a6
@@ -123,9 +125,9 @@ puts:
         include "ST1_wrap.S"
 
         .data
-m_banner:   dc.b    "YX6 player v0.1 - ZX1 streaming through ST1",13,10,0
+m_banner:   dc.b    "YX6 player v0.2 - ZX1 streaming through ST1",13,10,0
 m_playing:  dc.b    "Playing. Press any key to stop.",13,10,0
-m_bad:      dc.b    "Not a v0.1 yx6 file.",13,10,0
+m_bad:      dc.b    "Not a v2 yx6 file.",13,10,0
 m_bye:      dc.b    "Done.",13,10,0
         even
 

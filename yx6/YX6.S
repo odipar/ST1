@@ -8,9 +8,9 @@
 ; MinYMiser. Use it freely, including commercially, as long as your
 ; documentation says you used ZX1 through ST1 (see LICENSE).
 ;
-; v0.1 plays the fourteen standard sound registers. The YM6 special effects -
-; SID voice, digidrum, sinus-SID, sync-buzzer - are not played, and the yx6
-; packer has already masked their bits out of the register values.
+; v0.2 plays the fourteen standard sound registers, and loops. The YM6 special
+; effects - SID voice, digidrum, sinus-SID, sync-buzzer - are not played, and
+; the yx6 packer has already masked their bits out of the register values.
 ;
 ; REQUIRES ST1_wrap.S. Include both; the order does not matter. YX6 calls
 ; ST1_init and ST1_resume by label.
@@ -27,6 +27,15 @@
 ; is the decoder that fits: the player counts the calls itself and wraps the
 ; write pointer when it lands on the ring end.
 ;
+; LOOPING. A ZX1 stream can only be restarted from its beginning, so the packer
+; splits every register at the loop frame L: an intro stream for frames [0, L)
+; and a loop stream for [L, O). When a register's section runs out mid-refill
+; the player starts its loop stream over - a fresh decoder writing on into the
+; same ring - so the rings always hold one continuous sequence of values and
+; the read side never learns that anything happened. Nothing requires L to fall
+; on a group boundary: a refill that straddles the split simply decodes two
+; pieces. A tune that loops from frame 0 has no intro streams at all.
+;
 ; -----------------------------------------------------------------------------
 ; USING IT
 ;
@@ -37,16 +46,16 @@
 ;       bne     bad_file
 ;   vbl:                                ; once per frame, in supervisor mode
 ;       lea     workspace,a0
-;       bsr     YX6_play                ; d0 = 0 playing, 1 when the tune ended
+;       bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
 ;       ...
 ;       bsr     YX6_stop                ; silence the three voices
 ;
 ; The workspace holds the player's own fields, the fourteen decoder states and
 ; the fourteen rings, so its size depends on the ring size in the file:
 ;
-;   YX6_SIZE = YX6_FIXED + 14 * N       ; 480 + 14 * N bytes
+;   YX6_SIZE = YX6_FIXED + 14 * N       ; 496 + 14 * N bytes
 ;
-; For the default 1024-byte rings that is 14816 bytes. A program that knows N
+; For the default 1024-byte rings that is 14832 bytes. A program that knows N
 ; at build time can reserve it with
 ;
 ;       ds.b    YX6_FIXED+(YX6_STREAMS*1024)
@@ -56,9 +65,13 @@
 ; CALLS AND REGISTERS
 ;
 ;   YX6_init   in   a0 = .yx6 file, a1 = workspace
-;              out  d0 = 0 accepted, -1 not a v1 yx6 file with 14 streams
+;              out  d0 = 0 accepted, -1 not a v2 yx6 file with 14 streams
 ;   YX6_play   in   a0 = workspace
-;              out  d0 = 0 played a frame, 1 the tune is over (nothing written)
+;              out  d0 = 0 played a frame
+;                   d0 = 1 played a frame, and that frame ended the tune: the
+;                          next one is the loop frame L
+;                   d0 = -1 the tune is over and nothing was written, which
+;                          only a tune packed with -o can report
 ;   YX6_stop   in   -
 ;   CLOBBERED  d0-d5, a0-a3. d6, d7 and a4-a6 survive, as with ST1.
 ;
@@ -71,28 +84,32 @@
 ;   1. the file comes from the yx6 packer, which enforces C >= 14, N mod C = 0,
 ;      N >= 2C and offsets that stay inside the ring
 ;   2. the workspace is at an even address and large enough for the file's N
-;   3. YX6_play is called once per frame and never after it returns 1. Calling
-;      it again is harmless (it returns 1 and writes nothing), which is what
-;      keeps ST1_wrap's "never call the decoder again" rule intact
-;   4. to play the tune again, call YX6_init again: v0.1 restarts from frame 0
-;      rather than from the file's loop frame
+;   3. YX6_play is called once per frame and never after it returns -1.
+;      Calling it again is harmless - it returns -1 and writes nothing - which
+;      is what keeps ST1_wrap's "never call the decoder again" rule intact
+;   4. a looping tune plays for as long as you keep calling: d0 = 1 marks each
+;      time round, and YX6_init is only needed to start again from frame 0
 ; -----------------------------------------------------------------------------
 
 YX6_STREAMS     equ     14              ; R0..R13; R14/R15 are I/O ports
 YX6_STATE_SIZE  equ     32              ; per stream, so the index is a shift
 
 ; Workspace layout.
-YX6_FRAME       equ     0               ; long  frames played so far
+YX6_FRAME       equ     0               ; long  position in the tune, in frames
 YX6_TOTAL       equ     4               ; long  O, the tune length in frames
-YX6_NEXT        equ     8               ; long  first value of the next group
+YX6_NEXT        equ     8               ; long  values decoded so far
 YX6_READ        equ     12              ; long  read offset in every ring
 YX6_RINGS       equ     16              ; long  base of the ring area
 YX6_FILE        equ     20              ; long  the .yx6 file
-YX6_N           equ     24              ; word  ring size N
-YX6_C           equ     26              ; word  values per call C
-YX6_SLOT        equ     28              ; word  refill slot, 0..C-1
-YX6_INDEX       equ     30              ; word  stream index, during init only
-YX6_STATE       equ     32              ; 14 decoder states
+YX6_LOOP        equ     24              ; long  L, the loop frame
+YX6_LOOPLEN     equ     28              ; long  O - L, zero when it does not loop
+YX6_PIECE       equ     32              ; long  values in the piece being decoded
+YX6_N           equ     36              ; word  ring size N
+YX6_C           equ     38              ; word  values per call C
+YX6_SLOT        equ     40              ; word  refill slot, 0..C-1
+YX6_INDEX       equ     42              ; word  stream index, during init only
+YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
+YX6_STATE       equ     48              ; 14 decoder states
 ; rmac evaluates left to right, so the parentheses here are load-bearing:
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
@@ -105,10 +122,12 @@ YS_D2           equ     12              ; long  d2, N : signed offset
 YS_QUEUE        equ     16              ; byte  d0, bit queue
 YS_START        equ     20              ; long  this stream's ring
 YS_END          equ     24              ; long  one past its last byte
+YS_LEFT         equ     28              ; long  values left in the current section
 
 ; The .yx6 header, as written by the packer.
 YH_MAGIC        equ     0
 YH_VERSION      equ     4
+YH_FLAGS        equ     6
 YH_FRAMES       equ     8
 YH_PLAYER_HZ    equ     12
 YH_STREAM_COUNT equ     14
@@ -116,10 +135,12 @@ YH_RING         equ     16
 YH_CHUNK        equ     18
 YH_LOOP         equ     20
 YH_CLOCK        equ     24
-YH_TABLE        equ     28              ; 14 stream offsets from the file start
+YH_INTRO_TABLE  equ     28              ; 14 offsets: the frames before the loop
+YH_LOOP_TABLE   equ     84              ; 14 offsets: the frames from L on
 
 YX6_MAGIC       equ     $59583621       ; 'YX6!'
-YX6_VERSION     equ     1
+YX6_VERSION     equ     2
+YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
 YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
 YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
 YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
@@ -146,22 +167,36 @@ YX6_init:
         bne     .rejected
 
         move.l  YH_FRAMES(a0),YX6_TOTAL(a3)
+        move.l  YH_LOOP(a0),YX6_LOOP(a3)
         move.w  YH_RING(a0),YX6_N(a3)
         move.w  YH_CHUNK(a0),YX6_C(a3)
+        move.w  YH_FLAGS(a0),d0
+        and.w   #YX6_FLAG_LOOPS,d0
+        move.w  d0,YX6_LOOPS(a3)
         clr.l   YX6_FRAME(a3)
         clr.l   YX6_READ(a3)
         clr.w   YX6_SLOT(a3)
         lea     YX6_FIXED(a3),a1        ; the rings follow the decoder states
         move.l  a1,YX6_RINGS(a3)
 
-        move.l  YX6_TOTAL(a3),d0        ; the first group is min(C, O) values
-        moveq   #0,d1
-        move.w  YX6_C(a3),d1
+        move.l  YX6_TOTAL(a3),d0        ; the loop section is O - L frames long,
+        sub.l   YX6_LOOP(a3),d0         ; and empty when the tune plays once
+        tst.w   YX6_LOOPS(a3)
+        bne.s   .loop_length
+        moveq   #0,d0
+.loop_length:
+        move.l  d0,YX6_LOOPLEN(a3)
+
+        moveq   #0,d1                   ; the first group is C values, or the
+        move.w  YX6_C(a3),d1            ; whole tune when that is shorter and
+        tst.w   YX6_LOOPS(a3)           ; there is no loop to carry on into
+        bne.s   .first_group
+        move.l  YX6_TOTAL(a3),d0
         cmp.l   d1,d0
         bcc.s   .first_group
-        move.l  d0,d1                   ; a tune shorter than one group
+        move.l  d0,d1
 .first_group:
-        move.l  d1,YX6_NEXT(a3)         ; decoded so far, and where group 1 starts
+        move.l  d1,YX6_NEXT(a3)         ; values decoded once init is done
 
         clr.w   YX6_INDEX(a3)           ; the loop counter lives here: every
 .stream:                                ; register is state during the calls
@@ -175,31 +210,119 @@ YX6_init:
         movea.l YX6_RINGS(a3),a1
         adda.l  d0,a1
         move.l  a1,YS_START(a2)
+        move.l  a1,YS_WRITE(a2)
         move.l  a1,d0
         add.l   d3,d0
         move.l  d0,YS_END(a2)
 
+; A tune that loops from frame 0 has no intro streams, so its registers start
+; on the loop section - which is then the whole tune.
+        move.l  YX6_LOOP(a3),d0
+        move.w  #YH_INTRO_TABLE,d4
+        bne.s   .section
+        move.l  YX6_LOOPLEN(a3),d0
+        move.w  #YH_LOOP_TABLE,d4
+.section:
+        move.l  d0,YS_LEFT(a2)          ; values before this stream runs out
+
         move.w  YX6_INDEX(a3),d0
-        lsl.w   #2,d0                   ; the stream table holds long offsets
+        lsl.w   #2,d0                   ; the tables hold long offsets
+        add.w   d4,d0
         movea.l YX6_FILE(a3),a0
-        move.l  YH_TABLE(a0,d0.w),d0
+        move.l  0(a0,d0.w),d0
         adda.l  d0,a0                   ; the packed stream itself
         bsr     ST1_init
-        move.w  YX6_NEXT+2(a3),d3       ; min(C, O) fits a word: C <= N
-        bsr     ST1_resume
 
         move.w  YX6_INDEX(a3),d3        ; a2 was scratch for the decoder
         lsl.w   #5,d3
         lea     YX6_STATE(a3,d3.w),a2
-        bsr     YX6_save
+        move.l  a0,YS_INPUT(a2)
+        move.b  d0,YS_QUEUE(a2)
+        move.l  d1,YS_D1(a2)
+        move.l  d2,YS_D2(a2)
+
+        move.w  YX6_INDEX(a3),d0        ; and its first group
+        lsl.w   #5,d0
+        move.w  YX6_NEXT+2(a3),d3       ; C, or fewer: both fit a word
+        bsr     YX6_fill
         addq.w  #1,YX6_INDEX(a3)
         cmp.w   #YX6_STREAMS,YX6_INDEX(a3)
-        bne.s   .stream
+        bne     .stream
 
         moveq   #0,d0
         rts
 .rejected:
         moveq   #-1,d0
+        rts
+
+; -----------------------------------------------------------------------------
+; YX6_fill: d0.w = stream index * YX6_STATE_SIZE, d3.w = values wanted.
+; Produces exactly that many values for one register, crossing into the loop
+; section - and around it again - as often as it takes. Straddling matters even
+; for one group: nothing says the loop frame falls on a group boundary.
+; -----------------------------------------------------------------------------
+YX6_fill:
+        movem.l d6-d7,-(sp)             ; two registers that survive a decoder
+        lea     YX6_STATE(a3,d0.w),a2   ; call, which its own state needs
+        move.l  a2,d6
+        moveq   #0,d7
+        move.w  d3,d7                   ; values still wanted
+.piece:
+        move.l  YS_LEFT(a2),d0
+        bne.s   .section
+        bsr     YX6_start_loop          ; this section ran out: go round again
+        move.l  YS_LEFT(a2),d0
+        beq.s   .done                   ; nothing to go round to; do not hang
+.section:
+        cmp.l   d7,d0
+        bcs.s   .piece_size
+        move.l  d7,d0                   ; the section covers all that is wanted
+.piece_size:
+        move.l  d0,YX6_PIECE(a3)        ; needed again after the call
+        sub.l   d0,YS_LEFT(a2)
+        sub.l   d0,d7
+
+        movea.l YS_INPUT(a2),a0
+        movea.l YS_WRITE(a2),a1
+        move.b  YS_QUEUE(a2),d0
+        move.l  YS_D1(a2),d1
+        move.l  YS_D2(a2),d2
+        move.w  YX6_PIECE+2(a3),d3      ; a piece is at most C, so it fits a word
+        bsr     ST1_resume
+        movea.l d6,a2
+        bsr     YX6_save
+        tst.l   d7
+        bne.s   .piece
+.done:
+        movem.l (sp)+,d6-d7
+        rts
+
+; -----------------------------------------------------------------------------
+; YX6_start_loop: a2 = state block. Starts this register's loop stream over -
+; a fresh decoder, reading from the top of the loop section, still writing
+; where the last one stopped. ST1_init wants the ring start so that its packed
+; metadata comes out right; the write pointer is restored from the block, which
+; is why it is stored rather than held in a register.
+; -----------------------------------------------------------------------------
+YX6_start_loop:
+        move.l  a2,d0
+        sub.l   a3,d0
+        sub.w   #YX6_STATE,d0
+        lsr.w   #3,d0                   ; k * 32 becomes k * 4, a table index
+        movea.l YX6_FILE(a3),a0
+        move.l  YH_LOOP_TABLE(a0,d0.w),d0
+        beq.s   .no_loop                ; this tune has no loop section
+        adda.l  d0,a0
+        movea.l YS_START(a2),a1
+        moveq   #0,d3
+        move.w  YX6_N(a3),d3
+        bsr     ST1_init
+        move.l  a0,YS_INPUT(a2)
+        move.b  d0,YS_QUEUE(a2)
+        move.l  d1,YS_D1(a2)
+        move.l  d2,YS_D2(a2)
+        move.l  YX6_LOOPLEN(a3),YS_LEFT(a2)
+.no_loop:
         rts
 
 ; YX6_save: a2 = state block, decoder state in a0/a1/d0/d1/d2. Wraps the write
@@ -225,8 +348,8 @@ YX6_play:
         move.l  YX6_FRAME(a3),d0
         cmp.l   YX6_TOTAL(a3),d0
         bcs.s   .frame
-        moveq   #1,d0                   ; past the last frame: write nothing
-        rts
+        moveq   #-1,d0                  ; past the last frame of a tune that
+        rts                             ; does not loop: write nothing
 
 .frame:                                 ; the same offset in all fourteen rings
         movea.l YX6_RINGS(a3),a1
@@ -259,27 +382,19 @@ YX6_play:
         move.w  YX6_SLOT(a3),d0
         cmp.w   #YX6_STREAMS,d0
         bcc.s   .advance
-        move.l  YX6_NEXT(a3),d1
-        move.l  YX6_TOTAL(a3),d2
-        sub.l   d1,d2                   ; values still packed
-        ble.s   .advance                ; all decoded: never call ST1 again
         moveq   #0,d3
-        move.w  YX6_C(a3),d3
-        cmp.l   d3,d2
-        bcc.s   .budget
-        move.l  d2,d3                   ; the last group is a short one
-.budget:
+        move.w  YX6_C(a3),d3            ; a whole group
+        tst.w   YX6_LOOPS(a3)
+        bne.s   .refill                 ; a looping tune never runs out
+        move.l  YX6_TOTAL(a3),d1
+        sub.l   YX6_NEXT(a3),d1         ; values still packed
+        ble.s   .advance                ; all decoded: never call ST1 again
+        cmp.l   d3,d1
+        bcc.s   .refill
+        move.l  d1,d3                   ; the last group is a short one
+.refill:
         lsl.w   #5,d0
-        lea     YX6_STATE(a3,d0.w),a2
-        move.l  a2,-(sp)                ; the decoder uses a2 as scratch
-        movea.l YS_INPUT(a2),a0
-        movea.l YS_WRITE(a2),a1
-        move.b  YS_QUEUE(a2),d0
-        move.l  YS_D1(a2),d1
-        move.l  YS_D2(a2),d2
-        bsr     ST1_resume
-        movea.l (sp)+,a2
-        bsr     YX6_save
+        bsr     YX6_fill
 
 .advance:
         addq.l  #1,YX6_FRAME(a3)
@@ -303,6 +418,19 @@ YX6_play:
         add.l   d1,YX6_NEXT(a3)
 .slot_ready:
         move.w  d0,YX6_SLOT(a3)
+
+; The rings hold the tune as one continuous sequence, so reaching the end of
+; the last frame simply means the next values in them are the loop section's.
+; The frame counter follows: it goes back to L, not to 0.
+        move.l  YX6_FRAME(a3),d0
+        cmp.l   YX6_TOTAL(a3),d0
+        bcs.s   .played
+        tst.w   YX6_LOOPS(a3)
+        beq.s   .played                 ; the next call reports the end
+        move.l  YX6_LOOP(a3),YX6_FRAME(a3)
+        moveq   #1,d0                   ; played, and wrapped to the loop point
+        rts
+.played:
         moveq   #0,d0
         rts
 

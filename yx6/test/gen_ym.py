@@ -104,6 +104,51 @@ def expected_writes(frames, source=None):
     return per_frame
 
 
+def frame_order(frames, loop_frame, count):
+    """Which frame of the tune each played frame shows, following the loop.
+
+    A looping tune runs 0, 1, ... O-1, L, L+1, ... O-1, L, ...; one that plays
+    once just stops. Pass loop_frame=None for that.
+    """
+    order = []
+    frame = 0
+    for _ in range(count):
+        order.append(frame)
+        frame += 1
+        if frame >= frames:
+            if loop_frame is None:
+                break
+            frame = loop_frame
+    return order
+
+
+def chip_states(frames, source=None, loop_frame=None, count=None):
+    """What the sound chip must hold after each played frame.
+
+    A player is free to skip writing a register whose value has not changed -
+    the chip cannot tell - so state, not the write sequence, is what has to
+    match. R13 is the exception: writing it restarts the envelope, so each
+    frame also reports whether R13 was written at all, which is observable.
+    """
+    vectors = masked(frames, source)
+    order = frame_order(frames, loop_frame, count if count is not None else frames)
+    state = [0] * PLAY_REGISTERS
+    history = []
+    for frame in order:
+        envelope_written = False
+        for register in range(PLAY_REGISTERS):
+            value = vectors[register][frame]
+            if register == 7:
+                value |= PORT_BITS
+            if register == 13:
+                if value == NO_ENVELOPE_CHANGE:
+                    continue
+                envelope_written = True
+            state[register] = value
+        history.append((list(state), envelope_written))
+    return history
+
+
 def ym6_file(frames, source=None, interleaved=True, player_hz=50, loop_frame=0):
     """A complete, unpacked YM6! file - what the yx6 packer takes as input."""
     values = source if source is not None else registers(frames)

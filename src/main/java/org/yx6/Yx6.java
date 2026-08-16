@@ -22,16 +22,21 @@ public final class Yx6 {
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
         int chunk = Yx6Format.DEFAULT_CHUNK;
+        int loopFrame = -1;                     // -1 until the YM header decides
+        boolean playOnce = false;
         boolean forcedMode = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
+                case "-o" -> playOnce = true;
                 default -> {
                     if (args[i].startsWith("-n")) {
                         ringSize = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-c")) {
                         chunk = parseNumber(args[i].substring(2));
+                    } else if (args[i].startsWith("-l")) {
+                        loopFrame = parseNumber(args[i].substring(2), true);
                     } else {
                         throw error("Invalid parameter " + args[i]);
                     }
@@ -46,11 +51,13 @@ public final class Yx6 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: yx6 [-f] [-nN] [-cC] input.ym [output.yx6]
+                    Usage: yx6 [-f] [-o] [-nN] [-cC] [-lF] input.ym [output.yx6]
                       -f      Force overwrite of output file
+                      -o      Play once: pack no loop section
                       -nN     Ring size per register, in bytes (default 1024)
                       -cC     Values decoded per call, and the round-robin group
                               size (default 16; needs C >= 14 and N mod C = 0)
+                      -lF     Loop from frame F, overriding the YM header
 
                     The input is an unpacked YM5!/YM6! dump. Distributed .ym files
                     are LHA archives: unpack one first with `lha x song.ym`.""");
@@ -82,7 +89,26 @@ public final class Yx6 {
             throw error(inputName + ": " + e.getMessage());
         }
 
-        Yx6Encoder.Result result = Yx6Encoder.encode(song, ringSize, chunk);
+        // The YM header's loop frame is the default; -lF overrides it and -o
+        // drops the loop altogether.
+        if (loopFrame < 0 && !playOnce) {
+            loopFrame = (int) Math.min(song.loopFrame(), Integer.MAX_VALUE);
+            if (loopFrame >= song.frames()) {
+                System.out.printf("Warning: the YM loop frame is %d in a %d-frame tune; "
+                        + "looping from the start instead%n", loopFrame, song.frames());
+                loopFrame = 0;
+            }
+        }
+        if (playOnce) {
+            loopFrame = -1;
+        }
+
+        Yx6Encoder.Result result;
+        try {
+            result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame);
+        } catch (IllegalArgumentException e) {
+            throw error(e.getMessage());
+        }
         try {
             Files.write(outputPath, result.file());
         } catch (IOException e) {
@@ -107,9 +133,15 @@ public final class Yx6 {
                 song.frames(), song.playerHz(),
                 song.frames() / song.playerHz() / 60, song.frames() / song.playerHz() % 60,
                 Yx6Format.STREAMS, result.ringSize(), result.chunk());
+        System.out.println(result.loops()
+                ? result.loopFrame() == 0
+                        ? "Loops from the start"
+                        : "Plays frames 0-" + (result.loopFrame() - 1)
+                                + ", then loops from frame " + result.loopFrame()
+                : "Plays once, then stops");
         for (Yx6Encoder.Stream stream : result.streams()) {
-            System.out.printf("  R%-2d %6d -> %6d bytes (%5.1f%%)%n", stream.register(),
-                    stream.frames(), stream.packedSize(),
+            System.out.printf("  R%-2d %-5s %6d -> %6d bytes (%5.1f%%)%n", stream.register(),
+                    stream.loop() ? "loop" : "intro", stream.frames(), stream.packedSize(),
                     100.0 * stream.packedSize() / stream.frames());
         }
         System.out.printf("Packed %d register bytes into %d (%.1f%%), file %d bytes%n",
@@ -139,9 +171,14 @@ public final class Yx6 {
     }
 
     private static int parseNumber(String argument) {
+        return parseNumber(argument, false);
+    }
+
+    /** Parses a numeric argument; {@code zeroAllowed} for a loop frame of 0. */
+    private static int parseNumber(String argument, boolean zeroAllowed) {
         try {
             int value = Integer.parseInt(argument);
-            if (value <= 0) {
+            if (value < 0 || (value == 0 && !zeroAllowed)) {
                 throw error("Invalid parameter value " + argument);
             }
             return value;
