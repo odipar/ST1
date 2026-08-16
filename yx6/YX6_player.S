@@ -2,14 +2,15 @@
 ; YX6_player.S - a complete TOS program that plays one .yx6 file.
 ;
 ; This is what yx6/mkprg.sh assembles around a song: it installs YX6 on the
-; VBL, plays the tune - round its loop for as long as it has one - and quits
-; on a key press or when a play-once tune ends.
+; VBL, plays the tune - round its loop for as long as it has one - and quits on
+; SPACE or when a play-once tune ends.
 ; It is also the smallest worked example of the library's calling convention.
 ;
 ; It is not a standalone assembly: the includer supplies the two things that
 ; depend on the actual song, then includes this file.
 ;
 ;       RING_SIZE   equ     1024            ; the ring size in the file header
+;       YX6_EXIT_MARKER equ 0               ; 1 to drop a file when it stops
 ;               include "YX6_player.S"
 ;       song:   incbin  "song.yx6"          ; in .data, at an even address
 ;
@@ -20,12 +21,16 @@
 ; -----------------------------------------------------------------------------
 
 GEMDOS      equ     1
+Cnecin      equ     8
+Fcreate     equ     $3C
+Fclose      equ     $3E
 Cconws      equ     9
 Cconis      equ     11
 Mshrink     equ     $4A
 XBIOS       equ     14
 Supexec     equ     38
 VBL_VECTOR  equ     $70
+SPACE       equ     32
 
         .text
 
@@ -65,11 +70,16 @@ start:
 .wait:
         tst.w   finished                        ; the handler reports the end
         bne.s   .stop
-        move.w  #Cconis,-(sp)                   ; any key stops it early
+        move.w  #Cconis,-(sp)                   ; a key waiting?
         trap    #GEMDOS
         addq.l  #2,sp
         tst.w   d0
         beq.s   .wait
+        move.w  #Cnecin,-(sp)                   ; read it without echoing
+        trap    #GEMDOS
+        addq.l  #2,sp
+        cmp.b   #SPACE,d0                       ; space stops; anything else
+        bne.s   .wait                           ; keeps it playing
 .stop:
         move.l  #remove,-(sp)
         move.w  #Supexec,-(sp)
@@ -79,6 +89,24 @@ start:
 .quit:
         lea     m_bye,a0
         bsr     puts
+        .if YX6_EXIT_MARKER
+; A scripted run - yx6/play.sh - watches for this file so it can close the
+; emulator when the program stops, instead of leaving a window to be quit by
+; hand. It is the only thing the player ever writes to disk, and only when the
+; wrapper asks for it.
+        clr.w   -(sp)                           ; ordinary attributes
+        pea     m_marker
+        move.w  #Fcreate,-(sp)
+        trap    #GEMDOS
+        lea     8(sp),sp
+        tst.w   d0
+        bmi.s   .no_marker
+        move.w  d0,-(sp)
+        move.w  #Fclose,-(sp)
+        trap    #GEMDOS
+        addq.l  #4,sp
+.no_marker:
+        .endif
         clr.w   -(sp)                           ; Pterm0
         trap    #GEMDOS
 
@@ -126,7 +154,10 @@ puts:
 
         .data
 m_banner:   dc.b    "YX6 player v0.2 - ZX1 streaming through ST1",13,10,0
-m_playing:  dc.b    "Playing. Press any key to stop.",13,10,0
+m_playing:  dc.b    "Playing. Press SPACE to stop.",13,10,0
+        .if YX6_EXIT_MARKER
+m_marker:   dc.b    "YX6DONE.MRK",0
+        .endif
 m_bad:      dc.b    "Not a v2 yx6 file.",13,10,0
 m_bye:      dc.b    "Done.",13,10,0
         even

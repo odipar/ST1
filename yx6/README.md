@@ -15,15 +15,36 @@ digidrum, sinus-SID, sync-buzzer) are **not** played.
 | [YX6.S](YX6.S) | the player library, 810 bytes plus ST1_wrap's 222 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
+| [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
 
-## Making a tune
+## Test driving one
 
 Distributed `.ym` files are LHA archives; unpack one first. Then:
+
+```sh
+yx6/play.sh song.ym                   # 1024-byte rings, 16 values per call
+yx6/play.sh -n256 song.ym             # smaller rings: less RAM, worse ratio
+yx6/play.sh -n2048 -c32 song.ym       # longer calls: cheaper on average
+yx6/play.sh -o song.ym                # play once instead of looping
+```
+
+[play.sh](play.sh) packs the tune, builds a player around it and starts Hatari
+with sound on. **Press SPACE in the Hatari window to stop**: the program exits,
+and the script closes the emulator behind it — nothing asks you to confirm
+anything. Point it at your own install with `HATARI=` and `TOS=`. Everything it
+builds is kept next to the tune in `<name>-n<ring>-c<chunk>/`, so you can
+compare two ring sizes by ear and keep both.
+
+Or do the steps yourself:
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
 yx6/mkprg.sh song.yx6                 # -> SONG.PRG, runnable on an ST
 ```
+
+`mkprg.sh -m` builds the same program but has it drop a `YX6DONE.MRK` file as
+it exits; that is how `play.sh` knows the tune has stopped. A plain build never
+touches the disk.
 
 The packer's parameters are the ring size and the chunk size:
 
