@@ -25,7 +25,7 @@ from unicorn.m68k_const import (
     UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_A6,
     UC_M68K_REG_A7, UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2,
     UC_M68K_REG_D3, UC_M68K_REG_D4, UC_M68K_REG_D5, UC_M68K_REG_D6,
-    UC_M68K_REG_D7, UC_M68K_REG_PC,
+    UC_M68K_REG_D7, UC_M68K_REG_PC, UC_M68K_REG_SR,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -155,6 +155,10 @@ class Player:
     def call(self, entry: str, registers=()):
         stack = STACK_TOP - 256
         self.uc.mem_write(stack, MAGIC.to_bytes(4, 'big'))
+        # Supervisor state, interrupts enabled: what a VBL handler runs in, and
+        # what the player needs - it touches the sound chip and its own mask.
+        # Set before a7, which is a different register in each state.
+        self.uc.reg_write(UC_M68K_REG_SR, 0x2000)
         self.uc.reg_write(UC_M68K_REG_A7, stack)
         for register, canary in PRESERVED.items():
             self.uc.reg_write(register, canary)
