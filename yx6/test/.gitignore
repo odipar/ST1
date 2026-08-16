@@ -1,0 +1,5 @@
+*.PRG
+tune.ym
+tune.yx6
+yx6data.inc
+__pycache__/

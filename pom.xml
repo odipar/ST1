@@ -17,7 +17,7 @@
         <errorprone.version>2.36.0</errorprone.version>
         <nullaway.version>0.12.3</nullaway.version>
         <!-- Every package is null-marked and enforced. -->
-        <nullaway.packages>org.jx1</nullaway.packages>
+        <nullaway.packages>org.jx1,org.yx6</nullaway.packages>
         <nullaway.severity>ERROR</nullaway.severity>
         <!-- CLI arguments for exec:exec@jx1 / exec:exec@djx1 (-Dargs="..."). -->
         <args></args>
@@ -108,6 +108,16 @@
                         <configuration>
                             <executable>java</executable>
                             <commandlineArgs>-ea -cp %classpath org.jx1.Djx1 ${args}</commandlineArgs>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>yx6</id>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>java</executable>
+                            <commandlineArgs>-ea -cp %classpath org.yx6.Yx6 ${args}</commandlineArgs>
                         </configuration>
                     </execution>
                 </executions>

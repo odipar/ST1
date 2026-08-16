@@ -1,5 +1,5 @@
 {
-  "fingerprint": "4a95c4a62e5540302cdfd984ece50934153e26189b0172b6f027707c2233880c",
+  "fingerprint": "d3275926f0a56999d39793092218903b543f12094fb30172e57f76fe5ba48234",
   "hatari": {
     "calibration": {
       "linear": {
@@ -76,11 +76,11 @@
     "68k/test/ST1_ring_test.S": "52a9f931adafa5264ca587b0c7d07340dcc75ca88a5fe8d943c5e748aabb0f5e",
     "68k/test/ST1_test.S": "2d03f4800b7933d2dac0aefcdb640ea316fb3fccc6d0adc1e53324d4556ebb1f",
     "68k/test/ST1_wrap_test.S": "b92ef3f8b9ad16bc1025ec92a768f662db369ada7b32304daeace3b51eff417e",
-    "68k/test/emu/cycle_model.py": "a53e7a42d424288d9d9b9b8966ea81e6ed43ebef3a1bc7c684164636b435ec85",
+    "68k/test/emu/cycle_model.py": "f5bb2d7466efe12791a2bd9b04564b4bb8084a16afbf9852d3fed3c6ad483ed5",
     "68k/test/gendata.py": "6011375674490f2e950a5213d22c3ae8ec6fcc3fe706d21fbd3860f7bb8e74a7",
     "68k/test/hatari_util.inc": "5a6ee71964e2e741f691b5c6b52d8badebac79399c6e357d485fb05de64cf405",
     "68k/test/run.sh": "b791da290a502a5adf3b73221b6431944f211fb417fb6bc946c0722c8e54ceca",
-    "pom.xml": "7cc4885331b2329b5f599b43391496f3464c1b8e177f1534ad0bcd86b04f475a",
+    "pom.xml": "97e2a3277d36ed4c7346763f2e8ac9450ae8ea043d7b35848a8470ec4daf9c7c",
     "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
     "src/main/java/org/jx1/Cli.java": "024bf122102d3b7f65c73f71668584d4145ae390d6ea69a10c1513ed4b3b6e7d",
     "src/main/java/org/jx1/Compressor.java": "4917bb5d80a6a6c9f7fb2e2a9e01a186ab0e22cbc56ba16263e4346629145e49",
