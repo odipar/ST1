@@ -33,6 +33,9 @@ final class Yx6EncoderTest {
 
         assertEquals(Yx6Format.MAGIC, longAt(file, Yx6Format.OFFSET_MAGIC));
         assertEquals(Yx6Format.VERSION, word(file, Yx6Format.OFFSET_VERSION));
+        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS), "a play-once tune does not loop");
+        assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_LOOP_FRAME),
+                "a play-once tune loops at its end");
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_FRAMES));
         assertEquals(50, word(file, Yx6Format.OFFSET_PLAYER_HZ));
         assertEquals(Yx6Format.STREAMS, word(file, Yx6Format.OFFSET_STREAM_COUNT));
@@ -42,7 +45,7 @@ final class Yx6EncoderTest {
         // The table is in register order, gapless, and covers the whole file.
         int expected = Yx6Format.HEADER_SIZE;
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
-            assertEquals(expected, longAt(file, Yx6Format.OFFSET_STREAM_TABLE + 4 * register),
+            assertEquals(expected, longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register),
                     "offset of stream " + register);
             expected += result.streams().get(register).packedSize();
         }
@@ -56,7 +59,7 @@ final class Yx6EncoderTest {
         byte[] file = result.file();
 
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
-            int from = longAt(file, Yx6Format.OFFSET_STREAM_TABLE + 4 * register);
+            int from = longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register);
             int to = from + result.streams().get(register).packedSize();
             byte[] unpacked = Decompressor.decompress(Arrays.copyOfRange(file, from, to));
             assertArrayEquals(Ym2149.mask(register, source.registers()[register]), unpacked,
@@ -81,7 +84,7 @@ final class Yx6EncoderTest {
             Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, 16);
             byte[] file = result.file();
             for (int register = 0; register < Yx6Format.STREAMS; register++) {
-                int from = longAt(file, Yx6Format.OFFSET_STREAM_TABLE + 4 * register);
+                int from = longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register);
                 int to = from + result.streams().get(register).packedSize();
                 assertArrayEquals(Ym2149.mask(register, source.registers()[register]),
                         Decompressor.decompress(Arrays.copyOfRange(file, from, to), new byte[ring]),
@@ -102,7 +105,7 @@ final class Yx6EncoderTest {
         byte[] file = result.file();
 
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
-            int from = longAt(file, Yx6Format.OFFSET_STREAM_TABLE + 4 * register);
+            int from = longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register);
             int to = from + result.streams().get(register).packedSize();
             var output = new java.io.ByteArrayOutputStream();
             var decoder = new Decompressor(Arrays.copyOfRange(file, from, to),

@@ -75,10 +75,10 @@ Keep `I` and `O` with the asset; use `-mN` when `N` is below 32512.
 ## YX6: the YM player, built
 
 [yx6/](yx6/README.md) implements the streaming-YM6 design described below: a
-Java packer that turns a YM6 dump into fourteen ZX1 streams, a 466-byte 68000
+Java packer that turns a YM6 dump into fourteen ZX1 streams, a 698-byte 68000
 player that streams them through ST1_wrap, and a script that links the two into
-a runnable `.PRG`. Version 0.1 plays the fourteen standard YM2149 registers and
-no effects.
+a runnable `.PRG`. Version 0.2 plays the fourteen standard YM2149 registers and
+loops; it plays no effects.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"

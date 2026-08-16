@@ -10,22 +10,30 @@ package org.yx6;
  *
  * <pre>
  *   0   4  'YX6!'
- *   4   2  format version (1)
- *   6   2  flags (0 in v0.1)
- *   8   4  O, the number of frames - the output size of every stream
+ *   4   2  format version (2)
+ *   6   2  flags: bit 0 set when the tune loops
+ *   8   4  O, the number of frames
  *  12   2  player frequency in Hz (50 for a standard ST tune)
  *  14   2  S, the stream count (14: R0..R13)
  *  16   2  N, the ring size in bytes each stream decodes through
  *  18   2  C, the chunk size one ST1_resume call produces
- *  20   4  loop frame, informational in v0.1
+ *  20   4  L, the loop frame; equal to O when the tune does not loop
  *  24   4  YM master clock in Hz, informational
- *  28   4*S  byte offset of each packed stream from the start of the file
- *  84   ...  the packed streams, in register order
+ *  28   4*S  byte offset of each intro stream, covering frames [0, L)
+ *  84   4*S  byte offset of each loop stream, covering frames [L, O)
+ * 140   ...  the packed streams
  * </pre>
  *
- * <p>The player needs {@code O}, {@code N}, {@code C} and the offsets; the
- * packed sizes are implied by the next offset and never needed, because
- * ST1_wrap counts output bytes rather than input bytes.
+ * <p>Each register is packed as two streams rather than one, because looping a
+ * ZX1 stream means starting a decoder over: the intro covers the frames before
+ * the loop point and the loop covers the rest, and the player restarts the
+ * loop decoders every time round. A tune that loops from the start has no
+ * intro streams, and one that does not loop has no loop streams; the unused
+ * half of the table is zero.
+ *
+ * <p>The player needs {@code O}, {@code L}, {@code N}, {@code C} and the
+ * offsets; the packed sizes are implied by the next offset and never needed,
+ * because ST1_wrap counts output bytes rather than input bytes.
  */
 public final class Yx6Format {
 
@@ -33,7 +41,10 @@ public final class Yx6Format {
     public static final int MAGIC = 0x59583621;
 
     /** The only version this release writes or reads. */
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
+
+    /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
+    public static final int FLAG_LOOPS = 1;
 
     /** R0..R13: the YM2149 sound registers. R14/R15 are I/O ports, never played. */
     public static final int STREAMS = 14;
@@ -48,9 +59,10 @@ public final class Yx6Format {
     public static final int OFFSET_CHUNK = 18;
     public static final int OFFSET_LOOP_FRAME = 20;
     public static final int OFFSET_MASTER_CLOCK = 24;
-    public static final int OFFSET_STREAM_TABLE = 28;
+    public static final int OFFSET_INTRO_TABLE = 28;
+    public static final int OFFSET_LOOP_TABLE = OFFSET_INTRO_TABLE + 4 * STREAMS;
 
-    public static final int HEADER_SIZE = OFFSET_STREAM_TABLE + 4 * STREAMS;
+    public static final int HEADER_SIZE = OFFSET_LOOP_TABLE + 4 * STREAMS;
 
     /** Default ring size: the size the ST1 timings in the README are quoted for. */
     public static final int DEFAULT_RING_SIZE = 1024;
