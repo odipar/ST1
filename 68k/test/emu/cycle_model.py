@@ -74,7 +74,10 @@ def timing_inputs() -> list[Path]:
         HERE / "cycle_model.py",
         REPO / "pom.xml",
     ]
-    return fixed + sorted((REPO / "src" / "main" / "java").rglob("*.java"))
+    # Only org.jx1 is an input: it produces the streams these numbers are
+    # measured on. Other packages in the tree (org.yx6) compile alongside it
+    # but cannot change a single byte the ST1 decoders see.
+    return fixed + sorted((REPO / "src" / "main" / "java" / "org" / "jx1").rglob("*.java"))
 
 
 def input_fingerprint() -> str:
