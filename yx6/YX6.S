@@ -76,8 +76,11 @@
 ;   CLOBBERED  d0-d5, a0-a3. d6, d7 and a4-a6 survive, as with ST1.
 ;
 ; YX6_play writes to the sound chip at $FFFF8800, so it must run in supervisor
-; mode - which a VBL handler already does. It performs no other side effect:
-; no interrupt setup, no memory allocation, nothing outside the workspace.
+; mode - which a VBL handler already does. It masks interrupts around the
+; fourteen writes, because selecting a register and writing it are two bus
+; cycles and TOS's own handlers use the chip too. Beyond that it performs no
+; side effect: no interrupt setup, no memory allocation, nothing outside the
+; workspace.
 ;
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
@@ -94,16 +97,17 @@
 YX6_STREAMS     equ     14              ; R0..R13; R14/R15 are I/O ports
 YX6_STATE_SIZE  equ     32              ; per stream, so the index is a shift
 
-; Workspace layout.
-YX6_FRAME       equ     0               ; long  position in the tune, in frames
-YX6_TOTAL       equ     4               ; long  O, the tune length in frames
+; Workspace layout. Counters that a frame touches are kept in the form the
+; frame wants them in: a pointer to walk, and a countdown to test against zero.
+YX6_CURSOR      equ     0               ; long  this frame's byte in ring 0
+YX6_LEFTFR      equ     4               ; long  frames before the tune ends
 YX6_NEXT        equ     8               ; long  values decoded so far
-YX6_READ        equ     12              ; long  read offset in every ring
+YX6_RINGEND     equ     12              ; long  one past ring 0, where it wraps
 YX6_RINGS       equ     16              ; long  base of the ring area
 YX6_FILE        equ     20              ; long  the .yx6 file
-YX6_LOOP        equ     24              ; long  L, the loop frame
+YX6_TOTAL       equ     24              ; long  O, the tune length in frames
 YX6_LOOPLEN     equ     28              ; long  O - L, zero when it does not loop
-YX6_PIECE       equ     32              ; long  values in the piece being decoded
+YX6_LOOP        equ     32              ; long  L, read at init to split sections
 YX6_N           equ     36              ; word  ring size N
 YX6_C           equ     38              ; word  values per call C
 YX6_SLOT        equ     40              ; word  refill slot, 0..C-1
@@ -114,15 +118,19 @@ YX6_STATE       equ     48              ; 14 decoder states
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
 
-; One saved ST1_wrap state, plus the ring bounds the wrap check needs.
-YS_INPUT        equ     0               ; long  a0, input position
-YS_WRITE        equ     4               ; long  a1, write pointer
-YS_D1           equ     8               ; long  d1, -ring.low : remaining
-YS_D2           equ     12              ; long  d2, N : signed offset
+; One saved ST1_wrap state, plus the ring bounds the wrap check needs. The
+; first four longs are in movem order - d1, d2, then a0, a1 - so the whole
+; decoder state loads and stores in one instruction each.
+YS_D1           equ     0               ; long  d1, -ring.low : remaining
+YS_D2           equ     4               ; long  d2, N : signed offset
+YS_INPUT        equ     8               ; long  a0, input position
+YS_WRITE        equ     12              ; long  a1, write pointer
 YS_QUEUE        equ     16              ; byte  d0, bit queue
 YS_START        equ     20              ; long  this stream's ring
 YS_END          equ     24              ; long  one past its last byte
 YS_LEFT         equ     28              ; long  values left in the current section
+; The movem block starts at the top of the state, so the two movems address it
+; as plain (a2) - see the note where they are used.
 
 ; The .yx6 header, as written by the packer.
 YH_MAGIC        equ     0
@@ -146,6 +154,25 @@ YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
 YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
 YX6_MIXER       equ     7
 YX6_ENVELOPE    equ     13
+
+; -----------------------------------------------------------------------------
+; YX6_WRITE: send one register's value straight from its ring to the sound
+; chip, then step a1 on to the next register's ring.
+;
+; Two moves and an add, with the register number assembled in as an immediate:
+; nothing is tested, nothing is counted, and the value never passes through a
+; data register. Registers 7 and 13 need their values touched, so they are
+; written out of line rather than through this macro.
+;
+; Skipping a register whose value has not changed was measured and dropped: a
+; sound-chip access on an ST costs about 1.5 cycles more than a RAM one, so the
+; compare that would save the write costs about as much as the write.
+; -----------------------------------------------------------------------------
+        .macro YX6_WRITE number
+        move.b  #\number,(a2)           ; select
+        move.b  (a1),2(a2)              ; and write
+        adda.l  d3,a1
+        .endm
 
 ; Jump table: bra.w keeps 4-byte slots for a program that loads YX6 as a blob.
                 bra.w   YX6_init
@@ -173,11 +200,15 @@ YX6_init:
         move.w  YH_FLAGS(a0),d0
         and.w   #YX6_FLAG_LOOPS,d0
         move.w  d0,YX6_LOOPS(a3)
-        clr.l   YX6_FRAME(a3)
-        clr.l   YX6_READ(a3)
+        move.l  YH_FRAMES(a0),YX6_LEFTFR(a3)
         clr.w   YX6_SLOT(a3)
         lea     YX6_FIXED(a3),a1        ; the rings follow the decoder states
         move.l  a1,YX6_RINGS(a3)
+        move.l  a1,YX6_CURSOR(a3)       ; frame 0 is the first byte of ring 0
+        moveq   #0,d0
+        move.w  YH_RING(a0),d0
+        add.l   a1,d0
+        move.l  d0,YX6_RINGEND(a3)      ; where the cursor goes back to the top
 
         move.l  YX6_TOTAL(a3),d0        ; the loop section is O - L frames long,
         sub.l   YX6_LOOP(a3),d0         ; and empty when the tune plays once
@@ -278,19 +309,24 @@ YX6_fill:
         bcs.s   .piece_size
         move.l  d7,d0                   ; the section covers all that is wanted
 .piece_size:
-        move.l  d0,YX6_PIECE(a3)        ; needed again after the call
         sub.l   d0,YS_LEFT(a2)
         sub.l   d0,d7
+        move.w  d0,d3                   ; a piece is at most C, so it fits a word
 
-        movea.l YS_INPUT(a2),a0
-        movea.l YS_WRITE(a2),a1
+; (a2) written out rather than YS_STATE(a2): with +o3 rmac folds a zero
+; displacement away on movem but keeps the addressing mode, and emits the
+; instruction without its extension word. The next word becomes the
+; displacement and the code runs off into nothing.
+        movem.l (a2),d1-d2/a0-a1
         move.b  YS_QUEUE(a2),d0
-        move.l  YS_D1(a2),d1
-        move.l  YS_D2(a2),d2
-        move.w  YX6_PIECE+2(a3),d3      ; a piece is at most C, so it fits a word
         bsr     ST1_resume
         movea.l d6,a2
-        bsr     YX6_save
+        cmpa.l  YS_END(a2),a1           ; YX6_save, inlined: this is the hot path
+        bne.s   .stored
+        movea.l YS_START(a2),a1         ; the call landed on the ring end
+.stored:
+        movem.l d1-d2/a0-a1,(a2)
+        move.b  d0,YS_QUEUE(a2)
         tst.l   d7
         bne.s   .piece
 .done:
@@ -345,37 +381,51 @@ YX6_save:
 ; -----------------------------------------------------------------------------
 YX6_play:
         movea.l a0,a3
-        move.l  YX6_FRAME(a3),d0
-        cmp.l   YX6_TOTAL(a3),d0
-        bcs.s   .frame
+        tst.l   YX6_LEFTFR(a3)
+        bne.s   .frame
         moveq   #-1,d0                  ; past the last frame of a tune that
         rts                             ; does not loop: write nothing
 
 .frame:                                 ; the same offset in all fourteen rings
-        movea.l YX6_RINGS(a3),a1
-        adda.l  YX6_READ(a3),a1
+        movea.l YX6_CURSOR(a3),a1
         moveq   #0,d3
         move.w  YX6_N(a3),d3            ; one ring to the next
         lea     YX6_PSG,a2
-        moveq   #0,d0                   ; register number
-        moveq   #YX6_STREAMS-1,d2
-.register:
-        move.b  (a1),d1
-        cmp.b   #YX6_MIXER,d0
-        bne.s   .not_mixer
-        or.b    #YX6_PORTS,d1           ; R7: the ST drives both I/O ports
-.not_mixer:
-        cmp.b   #YX6_ENVELOPE,d0
-        bne.s   .write
-        cmp.b   #YX6_NO_ENV,d1
-        beq.s   .next                   ; writing R13 would restart the envelope
-.write:
-        move.b  d0,(a2)                 ; select the register
-        move.b  d1,2(a2)                ; and write this frame's value
-.next:
+
+; Selecting a register and writing it are two bus cycles. An interrupt that
+; uses the sound chip in between - TOS has several, its floppy motor timeout
+; among them - would leave this write going to whatever register it selected,
+; so the burst runs masked. Cheap: about 24 cycles for the whole frame.
+        move.w  sr,-(sp)
+        ori.w   #$0700,sr
+
+        YX6_WRITE 0                     ; channel A period, fine and coarse
+        YX6_WRITE 1
+        YX6_WRITE 2                     ; channel B
+        YX6_WRITE 3
+        YX6_WRITE 4                     ; channel C
+        YX6_WRITE 5
+        YX6_WRITE 6                     ; noise period
+
+        move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
+        move.b  (a1),d1                 ; directions, which port A needs kept
+        or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
+        move.b  d1,2(a2)
         adda.l  d3,a1
-        addq.b  #1,d0
-        dbf     d2,.register
+
+        YX6_WRITE 8                     ; the three volumes
+        YX6_WRITE 9
+        YX6_WRITE 10
+        YX6_WRITE 11                    ; envelope period
+        YX6_WRITE 12
+
+        move.b  (a1),d1                 ; R13 restarts the envelope whenever it
+        cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
+        beq.s   .envelope_held
+        move.b  #YX6_ENVELOPE,(a2)
+        move.b  d1,2(a2)
+.envelope_held:
+        move.w  (sp)+,sr
 
 ; Refill the register whose turn it is. Slots 14..C-1 exist when C is larger
 ; than the register count; they simply have nothing to do.
@@ -397,17 +447,12 @@ YX6_play:
         bsr     YX6_fill
 
 .advance:
-        addq.l  #1,YX6_FRAME(a3)
-        moveq   #0,d1
-        move.w  YX6_N(a3),d1
-        move.l  YX6_READ(a3),d0
-        addq.l  #1,d0
-        cmp.l   d1,d0
-        bcs.s   .read_ready
-        moveq   #0,d0                   ; the read offset wraps with the rings
-.read_ready:
-        move.l  d0,YX6_READ(a3)
-
+        addq.l  #1,YX6_CURSOR(a3)       ; one byte along every ring
+        move.l  YX6_CURSOR(a3),d0
+        cmp.l   YX6_RINGEND(a3),d0
+        bcs.s   .cursor_ready
+        move.l  YX6_RINGS(a3),YX6_CURSOR(a3)
+.cursor_ready:
         move.w  YX6_SLOT(a3),d0
         addq.w  #1,d0
         cmp.w   YX6_C(a3),d0
@@ -421,13 +466,12 @@ YX6_play:
 
 ; The rings hold the tune as one continuous sequence, so reaching the end of
 ; the last frame simply means the next values in them are the loop section's.
-; The frame counter follows: it goes back to L, not to 0.
-        move.l  YX6_FRAME(a3),d0
-        cmp.l   YX6_TOTAL(a3),d0
-        bcs.s   .played
+; The countdown follows: it reloads with the loop section's length.
+        subq.l  #1,YX6_LEFTFR(a3)
+        bne.s   .played
         tst.w   YX6_LOOPS(a3)
-        beq.s   .played                 ; the next call reports the end
-        move.l  YX6_LOOP(a3),YX6_FRAME(a3)
+        beq.s   .played                 ; zero and no loop: the next call ends
+        move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
         moveq   #1,d0                   ; played, and wrapped to the loop point
         rts
 .played:

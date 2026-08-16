@@ -12,7 +12,7 @@ digidrum, sinus-SID, sync-buzzer) are **not** played.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 698 bytes plus ST1_wrap's 222 |
+| [YX6.S](YX6.S) | the player library, 810 bytes plus ST1_wrap's 222 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 
@@ -103,10 +103,33 @@ compression, since the loop half cannot reference the intro half — nothing at
 all for a tune that loops from frame 0, and about 19% on the synthetic test
 tune when it loops from the middle.
 
-Two register values are not written straight through. R7 gets the ST's I/O port
-direction bits (`$C0`) back, because on an ST port A drives the floppy select
-lines. R13 is skipped entirely on a frame whose value is `$FF`, the YM marker
-for "leave the envelope alone" — writing it would restart the envelope.
+### Writing the chip
+
+The fourteen writes are unrolled through a `YX6_WRITE` macro, one invocation per
+register, so the register number is an assembled-in immediate and the value goes
+straight from the ring to the chip without passing through a data register:
+
+```
+        move.b  #\number,(a2)          ; select
+        move.b  (a1),2(a2)              ; and write
+        adda.l  d3,a1                   ; on to the next register's ring
+```
+
+Two registers are not written that way. R7 gets the ST's I/O port direction bits
+(`$C0`) back, because on an ST port A drives the floppy select lines. R13 is
+skipped entirely on a frame whose value is `$FF`, the YM marker for "leave the
+envelope alone" — writing it would restart the envelope.
+
+Skipping registers whose value has not changed — the obvious next trick — was
+measured and **dropped**: on an ST a sound-chip access costs only about 1.5
+cycles more than a RAM one (32 vs 27 ticks for 56000 stores, against 12 for the
+bare loop), so the compare that would save a write costs about as much as the
+write.
+
+The burst runs with interrupts masked. Selecting a register and writing it are
+two bus cycles, and TOS's own handlers use the sound chip in between — its
+floppy motor timeout writes port A. Without the mask a write can land on
+whatever register the interrupt selected. It costs about 24 cycles a frame.
 
 ## What v0.2 does not do
 
@@ -168,15 +191,21 @@ and reports the cost:
 ```text
 SUM=OK wraps=1 sum=2941391492
 CALIB 12 241
-T 1700 129
+T 1700 90
 ```
 
-129 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **2,480 cycles per
-frame** — roughly 1.5% of a 50 Hz frame on an 8 MHz ST, including the harness's
+90 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 241 ticks, works out at about **1,730 cycles per
+frame** — roughly 1.1% of a 50 Hz frame on an 8 MHz ST, including the harness's
 own loop and the sound chip's bus wait states. Measure your own tune before
 budgeting: the byte limit is not a time limit, and how hard a chunk is to
 decode depends on the data.
+
+Most of what is left is the decoder itself: at `C=16` a refill decodes 16 bytes
+on fourteen frames out of every sixteen. Raising `C` amortises the per-call cost
+over more bytes — `-c32` saves roughly another 6% on average — at the price of a
+refill frame that costs twice as much, which is the wrong trade if your frame
+budget is tight.
 
 The harness masks interrupts while it verifies, and so should anything that
 reads the chip back: selecting a register and reading it are two bus cycles, and
