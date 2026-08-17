@@ -107,7 +107,10 @@ public final class Yx6 {
         try {
             result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame);
         } catch (IllegalArgumentException e) {
-            throw error(e.getMessage());
+            // The encoder always says what it rejected, but getMessage() is
+            // @Nullable, so give it something to fall back on.
+            String reason = e.getMessage();
+            throw error(reason != null ? reason : "cannot pack this tune with these options");
         }
         try {
             Files.write(outputPath, result.file());
