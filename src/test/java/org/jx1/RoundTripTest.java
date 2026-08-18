@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 final class RoundTripTest {
 
     private static byte[] compress(byte[] input) {
-        return Compressor.compress(Optimizer.optimize(input, 0, Jx1.MAX_OFFSET_ZX1), input, 0, false).output();
+        return Compressor.compress(Optimizer.optimize(input, 0, Jx1.MAX_OFFSET_ZX1, false), input, 0, false).output();
     }
 
     @Test
@@ -35,7 +35,7 @@ final class RoundTripTest {
     void quickModeRoundTrips() {
         byte[] input = TestData.farMatch();
         byte[] output = Compressor.compress(
-                Optimizer.optimize(input, 0, Jx1.MAX_OFFSET_ZX7), input, 0, false).output();
+                Optimizer.optimize(input, 0, Jx1.MAX_OFFSET_ZX7, false), input, 0, false).output();
         assertArrayEquals(input, Decompressor.decompress(output));
     }
 

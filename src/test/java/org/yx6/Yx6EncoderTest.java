@@ -28,7 +28,7 @@ final class Yx6EncoderTest {
 
     @Test
     void headerDescribesTheStreams() {
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(true), 1024, 16);
+        Yx6Encoder.Result result = Yx6Encoder.encode(song(true), 1024, 16, false);
         byte[] file = result.file();
 
         assertEquals(Yx6Format.MAGIC, longAt(file, Yx6Format.OFFSET_MAGIC));
@@ -55,7 +55,7 @@ final class Yx6EncoderTest {
     @Test
     void everyStreamUnpacksToTheMaskedRegister() {
         Ym6Reader.Song source = song(true);
-        Yx6Encoder.Result result = Yx6Encoder.encode(source, 1024, 16);
+        Yx6Encoder.Result result = Yx6Encoder.encode(source, 1024, 16, false);
         byte[] file = result.file();
 
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
@@ -69,8 +69,8 @@ final class Yx6EncoderTest {
 
     @Test
     void interleavedAndPerFrameFilesPackIdentically() {
-        assertArrayEquals(Yx6Encoder.encode(song(true), 1024, 16).file(),
-                Yx6Encoder.encode(song(false), 1024, 16).file());
+        assertArrayEquals(Yx6Encoder.encode(song(true), 1024, 16, false).file(),
+                Yx6Encoder.encode(song(false), 1024, 16, false).file());
     }
 
     @Test
@@ -81,7 +81,7 @@ final class Yx6EncoderTest {
         // has wrapped onto - so the output comparison is the check.
         Ym6Reader.Song source = song(true);
         for (int ring : new int[] {32, 256, 1024}) {
-            Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, 16);
+            Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, 16, false);
             byte[] file = result.file();
             for (int register = 0; register < Yx6Format.STREAMS; register++) {
                 int from = longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register);
@@ -101,7 +101,7 @@ final class Yx6EncoderTest {
         Ym6Reader.Song source = song(true);
         int ring = 256;
         int chunk = 16;
-        Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, chunk);
+        Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, chunk, false);
         byte[] file = result.file();
 
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
@@ -130,18 +130,18 @@ final class Yx6EncoderTest {
 
     @Test
     void everyOperationFitsAWordCounter() {
-        assertTrue(Yx6Encoder.encode(song(true), 1024, 16).longestOp() <= 65535);
+        assertTrue(Yx6Encoder.encode(song(true), 1024, 16, false).longestOp() <= 65535);
     }
 
     @Test
     void rejectsShapesThePlayerCannotRun() {
         Ym6Reader.Song source = song(true);
         // Fewer values per call than registers: the round-robin cannot fit.
-        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 1024, 13));
+        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 1024, 13, false));
         // Ring smaller than two chunks: the group being written would land on
         // the group being read.
-        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 16, 16));
+        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 16, 16, false));
         // ST1_wrap needs the chunk to divide the ring.
-        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 1000, 16));
+        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 1000, 16, false));
     }
 }

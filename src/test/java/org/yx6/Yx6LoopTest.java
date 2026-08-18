@@ -43,7 +43,7 @@ final class Yx6LoopTest {
     void eachSectionUnpacksToItsOwnSliceOfTheRegister() {
         int split = 397;                            // not a multiple of the chunk
         Ym6Reader.Song source = song(split);
-        Yx6Encoder.Result result = Yx6Encoder.encode(source, 1024, 16, split);
+        Yx6Encoder.Result result = Yx6Encoder.encode(source, 1024, 16, split, false);
         byte[] file = result.file();
 
         assertEquals(Yx6Format.FLAG_LOOPS, word(file, Yx6Format.OFFSET_FLAGS));
@@ -64,7 +64,7 @@ final class Yx6LoopTest {
 
     @Test
     void loopingFromTheStartPacksNoIntro() {
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 1024, 16, 0);
+        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 1024, 16, 0, false);
         byte[] file = result.file();
 
         assertEquals(0, longAt(file, Yx6Format.OFFSET_LOOP_FRAME));
@@ -78,7 +78,7 @@ final class Yx6LoopTest {
 
     @Test
     void playingOncePacksNoLoop() {
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 1024, 16, -1);
+        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 1024, 16, -1, false);
         byte[] file = result.file();
 
         assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS));
@@ -93,9 +93,9 @@ final class Yx6LoopTest {
 
     @Test
     void theSplitCostsRatioButLoopingFromZeroDoesNot() {
-        int whole = Yx6Encoder.encode(song(0), 1024, 16, -1).packedSize();
-        int fromStart = Yx6Encoder.encode(song(0), 1024, 16, 0).packedSize();
-        int fromMiddle = Yx6Encoder.encode(song(450), 1024, 16, 450).packedSize();
+        int whole = Yx6Encoder.encode(song(0), 1024, 16, -1, false).packedSize();
+        int fromStart = Yx6Encoder.encode(song(0), 1024, 16, 0, false).packedSize();
+        int fromMiddle = Yx6Encoder.encode(song(450), 1024, 16, 450, false).packedSize();
 
         assertEquals(whole, fromStart, "one section either way, so the same bytes");
         assertTrue(fromMiddle > whole, "splitting a register costs some ratio");
@@ -105,15 +105,15 @@ final class Yx6LoopTest {
     void rejectsALoopFrameOutsideTheTune() {
         Ym6Reader.Song source = song(0);
         assertThrows(IllegalArgumentException.class,
-                () -> Yx6Encoder.encode(source, 1024, 16, FRAMES));
+                () -> Yx6Encoder.encode(source, 1024, 16, FRAMES, false));
         assertThrows(IllegalArgumentException.class,
-                () -> Yx6Encoder.encode(source, 1024, 16, FRAMES + 10));
+                () -> Yx6Encoder.encode(source, 1024, 16, FRAMES + 10, false));
     }
 
     @Test
     void bothSectionsStayInsideTheRingAndTheWordCounters() {
         int ring = 256;
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(397), ring, 16, 397);
+        Yx6Encoder.Result result = Yx6Encoder.encode(song(397), ring, 16, 397, false);
         byte[] file = result.file();
         assertTrue(result.longestOp() <= 65535);
 
@@ -133,6 +133,6 @@ final class Yx6LoopTest {
     void theLoopFrameComesFromTheYmHeaderUnlessOverridden() {
         // What the CLI reads: a YM6 file carries its own loop frame.
         assertEquals(397, song(397).loopFrame());
-        assertNotEquals(397, Yx6Encoder.encode(song(397), 1024, 16, 0).loopFrame());
+        assertNotEquals(397, Yx6Encoder.encode(song(397), 1024, 16, 0, false).loopFrame());
     }
 }

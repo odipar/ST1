@@ -76,7 +76,8 @@ public final class Jx1 {
                     Usage: jx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]
                       -f      Force overwrite of output file
                       -b      Compress backwards
-                      -q      Quick non-optimal compression
+                      -q      Quick: event-driven parsing - the same packed
+                              size, but not byte-identical to zx1's output
                       -mN     Limit backreference offsets to N bytes
                       -lN     Split matches so no operation exceeds N bytes
                               (use -l65535 for the ST1 decoders)""");
@@ -110,10 +111,16 @@ public final class Jx1 {
         if (backwardsMode) {
             reverse(input);
         }
+        // -q keeps the full window and the exact optimum - the event-driven
+        // parser packs to the same size - but its ties fall differently, so
+        // only the default path is byte-identical to the C compressor. The old
+        // meaning, zx1's reduced ZX7 window, is one -m2176 away.
         int offsetLimit = maxOffset > 0 ? maxOffset
-                : quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
+                : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
+        Block parse = quickMode ? EventOptimizer.optimize(input, skip, offsetLimit)
+                                : FastOptimizer.optimize(input, skip, offsetLimit);
         Compressor.Result result = Compressor.compress(
-                Optimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode, maxOpLength);
+                parse, input, skip, backwardsMode, maxOpLength);
         byte[] output = result.output();
         if (backwardsMode) {
             reverse(output);

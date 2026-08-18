@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import org.jx1.Compressor;
 import org.jx1.Jx1;
-import org.jx1.Optimizer;
+import org.jx1.EventOptimizer;
 
 /**
  * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
@@ -52,7 +52,7 @@ public final class Yx6Encoder {
 
     /** Packs a tune that plays once and stops. */
     public static Result encode(Ym6Reader.Song song, int ringSize, int chunk) {
-        return encode(song, ringSize, chunk, -1);
+        return encode(song, ringSize, chunk, -1, true);
     }
 
     /**
@@ -60,7 +60,25 @@ public final class Yx6Encoder {
      * when {@code loopFrame} is negative. A loop frame of 0 means the whole
      * tune is the loop.
      */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk, int loopFrame) {
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                int loopFrame) {
+        return encode(song, ringSize, chunk, loopFrame, true);
+    }
+
+    /** A tune that plays once and stops, with the progress report turned off. */
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                boolean progress) {
+        return encode(song, ringSize, chunk, -1, progress);
+    }
+
+    /**
+     * As above, with the parser's progress report turned off. The fourteen
+     * register streams are packed one after another, so what it reports is
+     * progress through a stream rather than through the tune - worth watching
+     * at a terminal, noise anywhere else.
+     */
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                int loopFrame, boolean progress) {
         String problem = Yx6Format.checkShape(ringSize, chunk);
         if (!problem.isEmpty()) {
             throw new IllegalArgumentException(problem);
@@ -83,9 +101,9 @@ public final class Yx6Encoder {
         var loop = new byte[Yx6Format.STREAMS][];
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
             byte[] values = Ym2149.mask(register, song.registers()[register]);
-            intro[register] = pack(streams, register, false,
+            intro[register] = pack(streams, register, false, progress,
                     Arrays.copyOfRange(values, 0, split), offsetLimit);
-            loop[register] = pack(streams, register, true,
+            loop[register] = pack(streams, register, true, progress,
                     loops ? Arrays.copyOfRange(values, split, values.length) : new byte[0],
                     offsetLimit);
         }
@@ -96,12 +114,13 @@ public final class Yx6Encoder {
 
     /** Packs one section of one register; an empty section produces no stream. */
     private static byte[] pack(List<Stream> streams, int register, boolean loop,
-                               byte[] values, int offsetLimit) {
+                               boolean progress, byte[] values, int offsetLimit) {
         if (values.length == 0) {
             return new byte[0];
         }
         Compressor.Result result = Compressor.compress(
-                Optimizer.optimize(values, 0, offsetLimit), values, 0, false, Jx1.MAX_OP_ST1);
+                EventOptimizer.optimize(values, 0, offsetLimit, progress), values, 0, false,
+                Jx1.MAX_OP_ST1);
         streams.add(new Stream(register, loop, values.length, result.output().length,
                 result.longestOp()));
         return result.output();

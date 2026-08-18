@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 final class ResumableTest {
 
     private static byte[] compress(byte[] input, int offsetLimit) {
-        return Compressor.compress(Optimizer.optimize(input, 0, offsetLimit), input, 0, false).output();
+        return Compressor.compress(Optimizer.optimize(input, 0, offsetLimit, false), input, 0, false).output();
     }
 
     private static final class Collector extends Decompressor {

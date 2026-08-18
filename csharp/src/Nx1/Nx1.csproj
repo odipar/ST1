@@ -5,4 +5,7 @@
     <RootNamespace>Nx1</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nx1.Tests" />
+  </ItemGroup>
 </Project>

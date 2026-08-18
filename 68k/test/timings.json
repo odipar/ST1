@@ -1,5 +1,5 @@
 {
-  "fingerprint": "d3275926f0a56999d39793092218903b543f12094fb30172e57f76fe5ba48234",
+  "fingerprint": "9391e28dfec39379375526eee5f4a45cb9021f3308884280e97c19eb3c859ea7",
   "hatari": {
     "calibration": {
       "linear": {
@@ -71,7 +71,7 @@
   },
   "inputs": {
     "68k/ST1.S": "1dec47231489b01f159f66268b7f04a5c0f00e7a9ebb31b6dce58908134009fc",
-    "68k/ST1_ring.S": "2b497ef08f526f59fba93f5833431fa5729c94d448209100011105178f45386d",
+    "68k/ST1_ring.S": "ff8488cad799c4408e5b630c6f56e0029ec6291ea1584a0857cf969435ff5095",
     "68k/ST1_wrap.S": "325d8d9e34565f07d7145abae036927be831c68ef0496055fad600b91c7aa6c4",
     "68k/test/ST1_ring_test.S": "52a9f931adafa5264ca587b0c7d07340dcc75ca88a5fe8d943c5e748aabb0f5e",
     "68k/test/ST1_test.S": "2d03f4800b7933d2dac0aefcdb640ea316fb3fccc6d0adc1e53324d4556ebb1f",
@@ -82,12 +82,16 @@
     "68k/test/run.sh": "b791da290a502a5adf3b73221b6431944f211fb417fb6bc946c0722c8e54ceca",
     "pom.xml": "97e2a3277d36ed4c7346763f2e8ac9450ae8ea043d7b35848a8470ec4daf9c7c",
     "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
+    "src/main/java/org/jx1/ChainRebuilder.java": "61e19ba1db02c841eea6b22881248dc0319d27773adf8abff1e5cbd6488e1a6d",
     "src/main/java/org/jx1/Cli.java": "024bf122102d3b7f65c73f71668584d4145ae390d6ea69a10c1513ed4b3b6e7d",
     "src/main/java/org/jx1/Compressor.java": "4917bb5d80a6a6c9f7fb2e2a9e01a186ab0e22cbc56ba16263e4346629145e49",
     "src/main/java/org/jx1/Decompressor.java": "cc7cc9f2a21d80b42c4c206df448d70ba59010fc02a29896d1c97469b7cd0e8f",
     "src/main/java/org/jx1/Djx1.java": "eddb6c0e379a73e843cf84b7982da4c8af2600971c7afa5e65c3ea4d76dc5f24",
-    "src/main/java/org/jx1/Jx1.java": "6a22c7381d0ca55c0bf863f97fd78f77f9a78d340052f66fefae8a9ad0c9305a",
-    "src/main/java/org/jx1/Optimizer.java": "77503c26d694b8f6f45ba818bef76383635df8e19899331cae1800a152145031"
+    "src/main/java/org/jx1/EventOptimizer.java": "694e67c03bd3bff3d46053033e45d50d2282856a2ee7595cca40a04b7639af49",
+    "src/main/java/org/jx1/FastOptimizer.java": "71004469617b35da71fccedc12c2a471b67fb99af5c7d5641b0706a28f5843f8",
+    "src/main/java/org/jx1/Jx1.java": "cb84c83474a84dde353db693e7ce7b7c11eaed35cebb3ac68ab6b2f831c2fb97",
+    "src/main/java/org/jx1/Optimizer.java": "4d5b742e9e521d1e8f12f70a351ad89c511f37af2bee7e8d1ea20412d928a851",
+    "src/main/java/org/jx1/ProgressMeter.java": "b5fd86be539999b84cf117fab51738c75bcdd1c308c8c2a980e07ddf7d30a7df"
   },
   "model": {
     "binaries": {
@@ -96,8 +100,8 @@
         "sha256": "0c8848ba68d92771abd083ab2c11febef7dbe251a2bb8fafd3f8d4f3f125ce83"
       },
       "ring": {
-        "bytes": 266,
-        "sha256": "6ae67558a63087c87700ba820f6377ca02210ec3251d3926a0c83c7790a7d7ad"
+        "bytes": 272,
+        "sha256": "bec11f1c0a551dbd1875ef4e7279e8343f1d19ca9364694f2e5b541651b9f3e7"
       },
       "wrap": {
         "bytes": 222,
@@ -137,21 +141,21 @@
       "ring": {
         "1024/16": {
           "allsame": 29912,
-          "farmatch": 85164,
-          "maxoffset": 918610,
-          "period129": 31446,
-          "rle32k": 934374,
+          "farmatch": 85172,
+          "maxoffset": 918738,
+          "period129": 31450,
+          "rle32k": 934498,
           "text": 12780,
-          "wordsoup": 201586
+          "wordsoup": 201594
         },
         "256/16": {
-          "allsame": 30812,
-          "farmatch": 87634,
-          "maxoffset": 933054,
-          "period129": 33738,
-          "rle32k": 962274,
-          "text": 13196,
-          "wordsoup": 214426
+          "allsame": 30824,
+          "farmatch": 87678,
+          "maxoffset": 933566,
+          "period129": 33754,
+          "rle32k": 962770,
+          "text": 13200,
+          "wordsoup": 214470
         }
       },
       "wrap": {

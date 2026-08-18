@@ -11,7 +11,7 @@
 ; Resumable decode through a caller-supplied N-byte ring. Memory is bounded by
 ; N and every back-reference must fit it; for N below 32512, compress with -mN.
 ;
-; 266 bytes, position-independent, one body: no macros, no tables, no
+; 272 bytes, position-independent, one body: no macros, no tables, no
 ; self-modifying code. It runs from ROM, and since it keeps nothing in memory,
 ; a second concurrent stream is just a second set of registers.
 ;
@@ -128,7 +128,16 @@ wrap_a1:
         add.l   d1,d5                   ; low words cannot carry into N
         clr.w   d5
         swap    d5                      ; zero-extend N
-        suba.l  d5,a1                   ; wrap a1; leave room = N
+        suba.l  d5,a1                   ; wrap a1
+; Leave room = N-1, not N. A call that wraps and then fills the whole ring
+; would return a1 exactly where it started, and the caller reads its output as
+; [old a1 .. new a1) - so a full ring would be indistinguishable from nothing
+; at all. One byte short of the ring keeps that span honest for any budget.
+; A one-byte ring cannot spare the byte: there the span stays ambiguous, and a
+; caller that wraps a1 itself is the only way to read it.
+        subq.w  #1,d5
+        bne.s   have_room
+        addq.w  #1,d5
         bra.s   have_room
 
 source_wrapped:

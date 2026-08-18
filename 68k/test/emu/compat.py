@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Is jx1 still ZX1?
 
-Four questions, against the original C implementation built from this repo's
+Five questions, against the original C implementation built from this repo's
 own c/zx1/src - not a fixture, and not a binary someone left lying around:
 
-  1. does jx1 produce the same bytes as the C compressor, for the options C
-     has? (the format is defined by that output)
+  1. does jx1 produce the same bytes as the C compressor, for the options
+     whose output is C's byte for byte? (the format is defined by that output;
+     -q left this set when it was retargeted at the event-driven parser)
   2. does jx1 decompress what C compresses?
-  3. does C decompress what jx1 compresses, including the -mN and -lN options
-     C does not have? (they change which parse is chosen, never the encoding,
-     so the result has to be ordinary ZX1)
-  4. do the ST1 decoders decode a stream the C compressor produced?
+  3. does C decompress what jx1 compresses, for the options C cannot answer -
+     the -mN and -lN limits, and the retargeted -q? (they change which parse
+     is chosen, never the encoding, so the result has to be ordinary ZX1)
+  4. does -q pack to the default mode's size? (same total bit cost, so at
+     most one byte of control-bit rounding apart)
+  5. do the ST1 decoders decode a stream the C compressor produced?
 
-Question 4 is why this lives with the emulator tests: everything else here
+Question 5 is why this lives with the emulator tests: everything else here
 checks jx1 against jx1, so a shared misunderstanding of the format would pass
 unnoticed. This is the one script where the reference is somebody else's code.
 
@@ -116,12 +119,18 @@ def djx1(stream):
 CORPORA = [(n, d) for n, d, m in t.testcases() if m is None]
 if QUICK:
     CORPORA = [(n, d) for n, d in CORPORA if len(d) <= 3000]
-# The options the C compressor also has. -b and -q are whole different parses,
-# so they are worth as much as the default one.
-SHARED_FLAGS = [(), ('-b',), ('-q',)]
-# The options it does not: they restrict which parse is chosen, and the result
-# still has to be a stream C can read.
-JX1_FLAGS = [('-m256',), ('-m511',), ('-l65535',), ('-m1024', '-l65535'), ('-l1000',)]
+# The options the C compressor also has AND answers byte-for-byte. -b is a
+# whole different parse, so it is worth as much as the default one. -q is no
+# longer here: jx1's -q now means the event-driven parser - same packed size,
+# different ties - so its contract is checked below, not byte-compared.
+SHARED_FLAGS = [(), ('-b',)]
+# Options whose output C cannot produce but must be able to read: the window
+# and split limits, and the retargeted -q. Not -q -b: no reference decoder for
+# backwards streams exists (dzx1 has no -b either), which is why -b's only
+# anchor has always been the byte-compare above - and the engine is
+# direction-blind, so the combination adds no code path the two checks miss.
+JX1_FLAGS = [('-m256',), ('-m511',), ('-l65535',), ('-m1024', '-l65535'), ('-l1000',),
+             ('-q',)]
 
 
 def main():
@@ -153,7 +162,19 @@ def main():
                 failures += 1
     print(f'   {len(CORPORA)} corpora x {len(JX1_FLAGS) + 1} option sets')
 
-    print('4. the ST1 decoders decode a stream the C compressor produced')
+    print("4. -q packs to the default mode's size")
+    # The event-driven parser finds a parse of the same total bit cost, so the
+    # only size difference the retarget may cost is how each parse's control
+    # bits round against whole bytes: one byte.
+    for name, data in CORPORA:
+        quick, default = jx1(data, ('-q',)), jx1(data, ())
+        if quick is None or default is None or abs(len(quick) - len(default)) > 1:
+            print(f'   FAIL {name}: -q {len(quick) if quick else "refused"} vs '
+                  f'default {len(default) if default else "refused"}')
+            failures += 1
+    print(f'   {len(CORPORA)} corpora')
+
+    print('5. the ST1 decoders decode a stream the C compressor produced')
     decodes = 0
     for name, data in CORPORA:
         stream = c_compress(data)

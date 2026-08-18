@@ -111,7 +111,8 @@ public static class Nx1
                 "Usage: nx1 [-f] [-b] [-q] [-mN] [-lN] input [output.zx1]\n"
                 + "  -f      Force overwrite of output file\n"
                 + "  -b      Compress backwards\n"
-                + "  -q      Quick non-optimal compression\n"
+                + "  -q      Quick: event-driven parsing - the same packed\n"
+                + "          size, but not byte-identical to zx1's output\n"
                 + "  -mN     Limit backreference offsets to N bytes\n"
                 + "  -lN     Split matches so no operation exceeds N bytes\n"
                 + "          (use -l65535 for the ST1 decoders)");
@@ -141,16 +142,23 @@ public static class Nx1
             return Cli.Error($"Already existing output file {outputName}");
         }
 
-        // Reverse around the backwards encoder; explicit -m overrides -q.
+        // Reverse around the backwards encoder. -q keeps the full window and
+        // the exact optimum - the event-driven parser packs to the same size -
+        // but its ties fall differently, so only the default path is
+        // byte-identical to the reference compressor. The old meaning, zx1's
+        // reduced ZX7 window, is one -m2176 away.
         if (backwardsMode)
         {
             Array.Reverse(input);
         }
         int offsetLimit = maxOffset > 0
             ? maxOffset
-            : quickMode ? MaxOffsetZx7 : MaxOffsetZx1 - (backwardsMode ? 1 : 0);
+            : MaxOffsetZx1 - (backwardsMode ? 1 : 0);
+        Block parse = quickMode
+            ? EventOptimizer.Optimize(input, skip, offsetLimit)
+            : FastOptimizer.Optimize(input, skip, offsetLimit);
         Compressor.Result result = Compressor.Compress(
-            Optimizer.Optimize(input, skip, offsetLimit),
+            parse,
             input,
             skip,
             backwardsMode,
