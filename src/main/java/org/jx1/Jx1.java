@@ -113,7 +113,7 @@ public final class Jx1 {
         int offsetLimit = maxOffset > 0 ? maxOffset
                 : quickMode ? MAX_OFFSET_ZX7 : MAX_OFFSET_ZX1 - (backwardsMode ? 1 : 0);
         Compressor.Result result = Compressor.compress(
-                Optimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode, maxOpLength);
+                FastOptimizer.optimize(input, skip, offsetLimit), input, skip, backwardsMode, maxOpLength);
         byte[] output = result.output();
         if (backwardsMode) {
             reverse(output);

@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 final class GoldenTest {
 
     private static Compressor.Result compress(byte[] input, int skip, int offsetLimit, boolean backwards) {
-        return Compressor.compress(Optimizer.optimize(input, skip, offsetLimit), input, skip, backwards);
+        return Compressor.compress(Optimizer.optimize(input, skip, offsetLimit, false), input, skip, backwards);
     }
 
     private static void assertGolden(String expectedHex, int expectedDelta, Compressor.Result actual) {
