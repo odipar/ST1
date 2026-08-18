@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import org.jx1.Compressor;
 import org.jx1.Jx1;
-import org.jx1.FastOptimizer;
+import org.jx1.EventOptimizer;
 
 /**
  * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
@@ -119,7 +119,7 @@ public final class Yx6Encoder {
             return new byte[0];
         }
         Compressor.Result result = Compressor.compress(
-                FastOptimizer.optimize(values, 0, offsetLimit, progress), values, 0, false,
+                EventOptimizer.optimize(values, 0, offsetLimit, progress), values, 0, false,
                 Jx1.MAX_OP_ST1);
         streams.add(new Stream(register, loop, values.length, result.output().length,
                 result.longestOp()));

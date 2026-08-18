@@ -1,9 +1,5 @@
 package org.jx1;
 
-import java.util.ArrayDeque;
-import java.util.HashMap;
-import org.jspecify.annotations.Nullable;
-
 /**
  * {@link Optimizer}, restructured to not allocate: the same parse, found the
  * same way, producing byte-identical output - so {@code compat.py}'s
@@ -30,11 +26,6 @@ public final class FastOptimizer {
     public static final int INITIAL_OFFSET = Optimizer.INITIAL_OFFSET;
 
     private static final int NONE = Integer.MIN_VALUE;
-
-    /** Winner kinds: a literal run, a match reusing the offset, a new offset. */
-    private static final byte LITERALS = 1;
-    private static final byte REP = 2;
-    private static final byte NEW = 3;
 
     private final byte[] input;
     private final int skip;
@@ -74,16 +65,23 @@ public final class FastOptimizer {
                                  boolean progress) {
         var optimizer = new FastOptimizer(input, skip, offsetLimit);
         optimizer.forward(progress);
-        return optimizer.reconstruct();
+        return new ChainRebuilder(input, skip, optimizer.optimalBits,
+                optimizer.winKind, optimizer.winOffset, optimizer.winAux).rebuild();
+    }
+
+    /**
+     * The winning cost per position, for the tests that hold other optimizers
+     * to this one: the optimum is unique, so any exact optimizer must produce
+     * this exact array.
+     */
+    static int[] costs(byte[] input, int skip, int offsetLimit) {
+        var optimizer = new FastOptimizer(input, skip, offsetLimit);
+        optimizer.forward(false);
+        return optimizer.optimalBits;
     }
 
     private static int eliasGammaBits(int value) {
         return 2 * (31 - Integer.numberOfLeadingZeros(value)) + 1;
-    }
-
-    /** Does the DP's match branch run at this position and offset? */
-    private boolean matches(int index, int offset) {
-        return index != skip && index >= offset && input[index] == input[index - offset];
     }
 
     // ------------------------------------------------------------- forward
@@ -127,7 +125,7 @@ public final class FastOptimizer {
                         stateEnd[offset] = index;
                         if (bits < best) {
                             best = bits;
-                            winKind[index] = REP;
+                            winKind[index] = ChainRebuilder.REP;
                             winOffset[index] = offset;
                             winAux[index] = litEnd[offset];
                         }
@@ -158,7 +156,7 @@ public final class FastOptimizer {
                             stateEnd[offset] = index;
                             if (bits < best) {
                                 best = bits;
-                                winKind[index] = NEW;
+                                winKind[index] = ChainRebuilder.NEW;
                                 winOffset[index] = offset;
                                 winAux[index] = length;
                             }
@@ -175,7 +173,7 @@ public final class FastOptimizer {
                         litEnd[offset] = index;
                         if (bits < best) {
                             best = bits;
-                            winKind[index] = LITERALS;
+                            winKind[index] = ChainRebuilder.LITERALS;
                             winOffset[index] = offset;
                             winAux[index] = stateEnd[offset];
                         }
@@ -187,169 +185,5 @@ public final class FastOptimizer {
             meter.advance(maxOffset);
         }
         meter.finish();
-    }
-
-    // -------------------------------------------------------- reconstruction
-
-    /** A pending resolution; see {@code St4FastOptimizer.Frame}. */
-    private static final class Frame {
-        final boolean isState;
-        final int offset;
-        final int index;
-        boolean scanned;
-        int runStart;
-        int prevEnd = NONE;
-        int newLength;
-        int newBits;
-
-        Frame(boolean isState, int offset, int index) {
-            this.isState = isState;
-            this.offset = offset;
-            this.index = index;
-        }
-    }
-
-    private Block reconstruct() {
-        int last = input.length - 1;
-        var winner = new @Nullable Block[input.length];
-        var states = new HashMap<Long, Block>();
-        states.put(stateKey(INITIAL_OFFSET, skip - 1),
-                new Block(-1, skip - 1, INITIAL_OFFSET, null));
-
-        var stack = new ArrayDeque<Frame>();
-        stack.push(new Frame(false, 0, last));
-        while (!stack.isEmpty()) {
-            Frame frame = stack.peek();
-            if (frame.isState ? resolveState(frame, states, winner, stack)
-                              : resolveWinner(frame, states, winner, stack)) {
-                stack.pop();
-            }
-        }
-        Block block = winner[last];
-        if (block == null) {
-            throw new AssertionError("reconstruction did not reach the last position");
-        }
-        return block;
-    }
-
-    private static long stateKey(int offset, int index) {
-        return (long) offset << 32 | (index & 0xFFFFFFFFL);
-    }
-
-    private boolean resolveWinner(Frame frame, HashMap<Long, Block> states,
-                                  @Nullable Block[] winner, ArrayDeque<Frame> stack) {
-        int index = frame.index;
-        if (winner[index] != null) {
-            return true;
-        }
-        int offset = winOffset[index];
-        switch (winKind[index]) {
-            case LITERALS -> {
-                Block state = states.get(stateKey(offset, winAux[index]));
-                if (state == null) {
-                    stack.push(new Frame(true, offset, winAux[index]));
-                    return false;
-                }
-                winner[index] = new Block(optimalBits[index], index, 0, state);
-            }
-            case REP -> {
-                int litAt = winAux[index];
-                int prevEnd = previousStateEnd(offset, litAt);
-                Block state = states.get(stateKey(offset, prevEnd));
-                if (state == null) {
-                    stack.push(new Frame(true, offset, prevEnd));
-                    return false;
-                }
-                winner[index] = new Block(optimalBits[index], index, offset,
-                        literalRun(state, litAt));
-            }
-            case NEW -> {
-                Block previous = winner[index - winAux[index]];
-                if (previous == null) {
-                    stack.push(new Frame(false, 0, index - winAux[index]));
-                    return false;
-                }
-                winner[index] = new Block(optimalBits[index], index, offset, previous);
-            }
-            default -> throw new AssertionError("position " + index + " has no winner");
-        }
-        return true;
-    }
-
-    private boolean resolveState(Frame frame, HashMap<Long, Block> states,
-                                 @Nullable Block[] winner, ArrayDeque<Frame> stack) {
-        int offset = frame.offset;
-        int end = frame.index;
-        if (!frame.scanned) {
-            frame.scanned = true;
-            assert matches(end, offset) : "a state can only end on a match";
-            int start = end;
-            while (matches(start - 1, offset)) {
-                start--;
-            }
-            frame.runStart = start;
-            frame.prevEnd = previousStateEnd(offset, start - 1);
-            int run = end - start + 1;
-            if (run >= 2) {
-                int bestCore = Integer.MAX_VALUE;
-                for (int length = 2; length <= run; length++) {
-                    int core = optimalBits[end - length] + eliasGammaBits(length - 1);
-                    if (core <= bestCore) {          // ties go to the longer split
-                        bestCore = core;
-                        frame.newLength = length;
-                    }
-                }
-                frame.newBits = bestCore + 1 + (offset > 128 ? 16 : 8);
-            }
-        }
-
-        if (frame.prevEnd != NONE) {                 // the rep candidate exists
-            Block previous = states.get(stateKey(offset, frame.prevEnd));
-            if (previous == null) {
-                stack.push(new Frame(true, offset, frame.prevEnd));
-                return false;
-            }
-            Block literal = literalRun(previous, frame.runStart - 1);
-            int repBits = literal.bits() + 1 + eliasGammaBits(end - frame.runStart + 1);
-            if (frame.newLength == 0 || repBits <= frame.newBits) {
-                states.put(stateKey(offset, end), new Block(repBits, end, offset, literal));
-                return true;
-            }
-        }
-        assert frame.newLength != 0 : "a state is a rep match or a new-offset match";
-        Block previous = winner[end - frame.newLength];
-        if (previous == null) {
-            stack.push(new Frame(false, 0, end - frame.newLength));
-            return false;
-        }
-        states.put(stateKey(offset, end), new Block(frame.newBits, end, offset, previous));
-        return true;
-    }
-
-    /** The literal run from just after {@code state} through {@code litEnd}. */
-    private Block literalRun(Block state, int litEnd) {
-        int length = litEnd - state.index();
-        int bits = state.bits() + 1 + eliasGammaBits(length) + length * 8;
-        return new Block(bits, litEnd, 0, state);
-    }
-
-    /**
-     * Where this offset's state ended at or before {@code from}, or NONE; see
-     * {@code St4FastOptimizer.previousStateEnd}. Offset one's fallback is the
-     * fake block just before the parse starts.
-     */
-    private int previousStateEnd(int offset, int from) {
-        int lastMatch = NONE;
-        for (int index = from; index > skip && index >= offset; index--) {
-            if (input[index] == input[index - offset]) {
-                if (lastMatch == NONE) {
-                    lastMatch = index;
-                }
-                if (offset == INITIAL_OFFSET || matches(index - 1, offset)) {
-                    return lastMatch;
-                }
-            }
-        }
-        return offset == INITIAL_OFFSET ? skip - 1 : NONE;
     }
 }

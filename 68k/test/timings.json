@@ -1,5 +1,5 @@
 {
-  "fingerprint": "3b3df0b22356fd87385ca6889364ee7d48e59ba9cd11d54a59e8767c77860f18",
+  "fingerprint": "63af086c12de662250ab9ad088871fac336a566bfad22c6346b646c50b8f08af",
   "hatari": {
     "calibration": {
       "linear": {
@@ -82,11 +82,13 @@
     "68k/test/run.sh": "b791da290a502a5adf3b73221b6431944f211fb417fb6bc946c0722c8e54ceca",
     "pom.xml": "97e2a3277d36ed4c7346763f2e8ac9450ae8ea043d7b35848a8470ec4daf9c7c",
     "src/main/java/org/jx1/Block.java": "64195f33d4224558739a2610dab340baae3d1fb7466e263bf43fdfbd1dbdef60",
+    "src/main/java/org/jx1/ChainRebuilder.java": "61e19ba1db02c841eea6b22881248dc0319d27773adf8abff1e5cbd6488e1a6d",
     "src/main/java/org/jx1/Cli.java": "024bf122102d3b7f65c73f71668584d4145ae390d6ea69a10c1513ed4b3b6e7d",
     "src/main/java/org/jx1/Compressor.java": "4917bb5d80a6a6c9f7fb2e2a9e01a186ab0e22cbc56ba16263e4346629145e49",
     "src/main/java/org/jx1/Decompressor.java": "cc7cc9f2a21d80b42c4c206df448d70ba59010fc02a29896d1c97469b7cd0e8f",
     "src/main/java/org/jx1/Djx1.java": "eddb6c0e379a73e843cf84b7982da4c8af2600971c7afa5e65c3ea4d76dc5f24",
-    "src/main/java/org/jx1/FastOptimizer.java": "3a4b800e73d91b145d80ab95adc0c2a5b9d281fd2b94dea51ac2e5a20d78dd49",
+    "src/main/java/org/jx1/EventOptimizer.java": "694e67c03bd3bff3d46053033e45d50d2282856a2ee7595cca40a04b7639af49",
+    "src/main/java/org/jx1/FastOptimizer.java": "71004469617b35da71fccedc12c2a471b67fb99af5c7d5641b0706a28f5843f8",
     "src/main/java/org/jx1/Jx1.java": "f0540670b4191dc6a977258d5b27da5da5b7761bb281f4c7a3e1ebd4a671a9b8",
     "src/main/java/org/jx1/Optimizer.java": "4d5b742e9e521d1e8f12f70a351ad89c511f37af2bee7e8d1ea20412d928a851",
     "src/main/java/org/jx1/ProgressMeter.java": "b5fd86be539999b84cf117fab51738c75bcdd1c308c8c2a980e07ddf7d30a7df"
