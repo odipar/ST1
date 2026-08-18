@@ -185,14 +185,25 @@ Build and run the Java tools:
 
 ```sh
 mvn package
-java -ea -cp target/classes org.jx1.Jx1  [-mN] [-lN] input [output.zx1]
+java -ea -cp target/classes org.jx1.Jx1  [-b] [-q] [-mN] [-lN] input [output.zx1]
 java -ea -cp target/classes org.jx1.Djx1 [-mN] input.zx1 [output]
 java -ea -cp target/classes org.yx6.Yx6  [-nN] [-cC] input.ym [output.yx6]
 ```
 
 For `jx1`, `-mN` limits how far the packed data can look back; for `djx1`, it
-sets the ring size. `-lN` limits the output bytes in one packed piece. Keep `-ea`
-when running the classes directly because input checks use Java assertions.
+sets the ring size. `-lN` limits the output bytes in one packed piece, and `-b`
+compresses backwards. `-q` packs with the event-driven parser: the same packed
+size as the default mode - both find exact optima - but not the C compressor's
+exact bytes, and on repetitive data dramatically faster. Measured against the
+ZX1 C compressor built from this repo's own sources:
+
+| corpus | C zx1 | jx1 | jx1 `-q` |
+|---|---:|---:|---:|
+| 32 KB of 68000 code | 7.6s | 2.9s | gates to the default |
+| 300 KB disk image | 6m 13s | 2m 14s | **0.9s** |
+
+Keep `-ea` when running the classes directly because input checks use Java
+assertions.
 
 The Java `Decompressor` can also stop after a chosen number of bytes:
 
