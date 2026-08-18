@@ -133,7 +133,7 @@ same input and memory limits.
 [yx6/](yx6/README.md) implements that design: a Java packer that turns a YM6
 dump into fourteen ZX1 streams, an 810-byte 68000 player that streams them
 through ST1_wrap, and a script that links the two into a runnable `.PRG`.
-Version 0.2 plays the fourteen standard YM2149 registers and loops; it plays no
+Version 1.0 plays the fourteen standard YM2149 registers and loops; it plays no
 effects.
 
 ```sh

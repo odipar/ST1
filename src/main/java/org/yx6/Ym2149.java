@@ -6,7 +6,7 @@ package org.yx6;
  * <p>A YM6 file carries its special effects (SID voice, digidrum, sinus-SID,
  * sync-buzzer) in bits that the sound chip itself does not use: the top nibbles
  * of R1/R3, the top bits of R6/R7 and of the three volume registers, plus R14
- * and R15 as effect data. Version 0.1 of yx6 plays no effects, so those bits are
+ * and R15 as effect data. Version 1.0 of yx6 plays no effects, so those bits are
  * masked away here - once, at packing time. That is both correct (they are not
  * chip state) and cheaper: constant high bits compress better, and the player
  * needs no masking code at all.

@@ -152,7 +152,7 @@ two bus cycles, and TOS's own handlers use the sound chip in between — its
 floppy motor timeout writes port A. Without the mask a write can land on
 whatever register the interrupt selected. It costs about 24 cycles a frame.
 
-## What v0.2 does not do
+## What v1.0 does not do
 
 * **No effects.** The packer masks the YM6 effect bits out of the register
   values and warns when it drops digidrum samples. A tune that leans on SID

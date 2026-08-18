@@ -8,7 +8,7 @@ import java.nio.file.Path;
  * Command-line YM to yx6 packer: reads a YM5!/YM6! register dump and writes a
  * {@code .yx6} file that the 68000 {@code YX6.S} player streams through ST1.
  *
- * <p>Version 0.1 plays the fourteen standard YM2149 registers. The YM6 special
+ * <p>Version 1.0 plays the fourteen standard YM2149 registers. The YM6 special
  * effects - SID voice, digidrum, sinus-SID, sync-buzzer - are dropped, along
  * with the register bits that carry them.
  */
@@ -17,7 +17,7 @@ public final class Yx6 {
     private Yx6() {}
 
     public static void main(String[] args) {
-        System.out.println("YX6: YM chiptune packer v0.1 by Robbert van Dalen, "
+        System.out.println("YX6: YM chiptune packer v1.0 by Robbert van Dalen, "
                 + "streaming ZX1 through ST1");
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
@@ -127,7 +127,7 @@ public final class Yx6 {
                 song.author().isBlank() ? "" : " by " + song.author(),
                 song.interleaved() ? "" : " (de-interleaved)");
         if (song.digidrums() > 0) {
-            System.out.printf("Warning: %d digidrum sample%s dropped; v0.1 plays no effects%n",
+            System.out.printf("Warning: %d digidrum sample%s dropped; v1.0 plays no effects%n",
                     song.digidrums(), song.digidrums() == 1 ? "" : "s");
         }
 
