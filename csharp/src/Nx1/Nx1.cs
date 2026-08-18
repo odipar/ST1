@@ -35,7 +35,7 @@ public static class Nx1
     {
         ArgumentNullException.ThrowIfNull(args);
         Console.WriteLine(
-            "NX1: Optimal data compressor v0.1 by Robbert van Dalen, "
+            "NX1: Optimal data compressor v1.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5: Optimal data compressor by Einar Saukas");
 
         // Process optional parameters.

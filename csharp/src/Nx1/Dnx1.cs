@@ -25,7 +25,7 @@ public static class Dnx1
     {
         ArgumentNullException.ThrowIfNull(args);
         Console.WriteLine(
-            "DNX1: Data decompressor v0.1 by Robbert van Dalen, "
+            "DNX1: Data decompressor v1.0 by Robbert van Dalen, "
             + "based on DZX1 v1.5: Data decompressor by Einar Saukas");
 
         // Process optional parameters.

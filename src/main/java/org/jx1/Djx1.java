@@ -15,7 +15,7 @@ public final class Djx1 {
     private Djx1() {}
 
     public static void main(String[] args) {
-        System.out.println("DJX1: Data decompressor v0.1 by Robbert van Dalen, "
+        System.out.println("DJX1: Data decompressor v1.0 by Robbert van Dalen, "
                 + "based on DZX1 v1.5: Data decompressor by Einar Saukas");
 
         // Process hidden optional parameters.
