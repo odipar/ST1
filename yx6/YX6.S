@@ -247,12 +247,18 @@ YX6_init:
         move.l  d0,YS_END(a2)
 
 ; A tune that loops from frame 0 has no intro streams, so its registers start
-; on the loop section - which is then the whole tune.
-        move.l  YX6_LOOP(a3),d0
+; on the loop section - which is then the whole tune. The load of L comes last
+; because it is the branch condition: a move to a data register writes the
+; flags, so the earlier order - the table constant moved after L - always
+; chose the intro table, and a loop-from-0 tune leaned on the fill's
+; section-exhausted path to recover. That worked, by accident: YS_LEFT came
+; out zero and ST1_init reads no stream data, so the bogus setup was replaced
+; before anything decoded. Choose the right table outright instead.
         move.w  #YH_INTRO_TABLE,d4
-        bne.s   .section
-        move.l  YX6_LOOPLEN(a3),d0
+        move.l  YX6_LOOP(a3),d0
+        bne.s   .section                ; L != 0: the intro covers [0, L)
         move.w  #YH_LOOP_TABLE,d4
+        move.l  YX6_LOOPLEN(a3),d0
 .section:
         move.l  d0,YS_LEFT(a2)          ; values before this stream runs out
 
