@@ -1,5 +1,5 @@
 {
-  "fingerprint": "63af086c12de662250ab9ad088871fac336a566bfad22c6346b646c50b8f08af",
+  "fingerprint": "9391e28dfec39379375526eee5f4a45cb9021f3308884280e97c19eb3c859ea7",
   "hatari": {
     "calibration": {
       "linear": {
@@ -89,7 +89,7 @@
     "src/main/java/org/jx1/Djx1.java": "eddb6c0e379a73e843cf84b7982da4c8af2600971c7afa5e65c3ea4d76dc5f24",
     "src/main/java/org/jx1/EventOptimizer.java": "694e67c03bd3bff3d46053033e45d50d2282856a2ee7595cca40a04b7639af49",
     "src/main/java/org/jx1/FastOptimizer.java": "71004469617b35da71fccedc12c2a471b67fb99af5c7d5641b0706a28f5843f8",
-    "src/main/java/org/jx1/Jx1.java": "f0540670b4191dc6a977258d5b27da5da5b7761bb281f4c7a3e1ebd4a671a9b8",
+    "src/main/java/org/jx1/Jx1.java": "cb84c83474a84dde353db693e7ce7b7c11eaed35cebb3ac68ab6b2f831c2fb97",
     "src/main/java/org/jx1/Optimizer.java": "4d5b742e9e521d1e8f12f70a351ad89c511f37af2bee7e8d1ea20412d928a851",
     "src/main/java/org/jx1/ProgressMeter.java": "b5fd86be539999b84cf117fab51738c75bcdd1c308c8c2a980e07ddf7d30a7df"
   },
