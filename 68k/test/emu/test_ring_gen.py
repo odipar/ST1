@@ -88,7 +88,12 @@ def run_ring(compressed, expected, n, chunk, ring, caller_wrap=True):
         assert 0 <= emitted <= chunk, \
             f'emitted {emitted} bytes with budget {chunk}'
         if r != 0 and emitted < chunk:
-            assert dst == ring + n, \
+            # A short continuing call stops at the ring end - or one byte before
+            # it, when the call opened by wrapping a1. The decoder keeps that
+            # byte back deliberately: filling the ring straight after a wrap
+            # would return a1 where it started, and [old a1 .. new a1) would
+            # read as no output at all rather than a whole ring of it.
+            assert dst in (ring + n, ring + n - 1), \
                 f'short continuing call stopped at {dst:#x}, before ring end'
         out += uc.mem_read(prev, emitted)
         if dst == ring + n:                     # full buffer
