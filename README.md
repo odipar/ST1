@@ -144,8 +144,14 @@ yx6/mkprg.sh song.yx6                 # -> SONG.PRG
 ## Compatibility with ZX1
 
 ST1, jx1, and nx1 use the standard ZX1 format. With no options, jx1 and nx1
-produce the same bytes as the original ZX1 C compressor. The `-mN` and `-lN`
-options described above only change how data is packed, not the file format.
+produce the same bytes as the original ZX1 C compressor. They just get there
+much faster: the same optimal parse is found without the C implementation's
+per-candidate block allocations - measured about 2.5-3x quicker than the C
+compressor built from this repo's own sources - and `-q` switches to an
+event-driven parser that packs repetitive data at the same size hundreds of
+times faster again, at the price of not being the C compressor's exact bytes.
+The `-mN` and `-lN` options described above only change how data is packed,
+not the file format.
 
 [68k/test/emu/compat.py](68k/test/emu/compat.py) compares jx1 output byte for
 byte with the original ZX1 C compressor, checks both sets of files with both
